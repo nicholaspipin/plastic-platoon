@@ -1,0 +1,21 @@
+{
+  "name": "plastic-platoon",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "shots": "node scripts/shots.mjs",
+    "perf": "node scripts/perf-probe.mjs"
+  },
+  "dependencies": {
+    "pixi.js": "^8.6.6"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.1",
+    "typescript": "~5.7.2",
+    "vite": "^6.0.7"
+  }
+}
