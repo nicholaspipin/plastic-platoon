@@ -8,16 +8,17 @@ export interface OfflineResult {
 
 /**
  * Offline earnings: the army kept fighting while the player was away.
- * Rate is the save's rolling scrap/sec estimate, paid at reduced efficiency,
- * capped at OFFLINE.capHours.
+ * Rate is the save's rolling scrap/sec estimate at full efficiency (research:
+ * generous offline wins), capped at a Command-Tree-upgradeable hour count.
  */
 export function computeOffline(
   save: Pick<SaveData, 'lastSeen' | 'scrapRate'>,
+  capHours: number,
   now = Date.now()
 ): OfflineResult | null {
   const awaySec = (now - save.lastSeen) / 1000;
   if (!isFinite(awaySec) || awaySec < OFFLINE.minAwaySec) return null;
-  const capped = Math.min(awaySec, OFFLINE.capHours * 3600);
+  const capped = Math.min(awaySec, capHours * 3600);
   const scrap = Math.floor(capped * save.scrapRate * OFFLINE.efficiency);
   if (scrap < 1) return null;
   return { seconds: awaySec, scrap };

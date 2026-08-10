@@ -186,8 +186,217 @@
   box-shadow: 0 1px 0 var(--gold-edge);
 }
 
+.prestige-fab {
+  animation: none;
+}
+.prestige-fab.hot {
+  animation: afford-pulse 1.3s ease-in-out infinite;
+}
+
+/* ---------- battle result / unlock / streak / tree ---------- */
+
+.win-toast {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 54px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--card);
+  color: var(--ink);
+  font-family: var(--font);
+  font-weight: 800;
+  font-size: 15px;
+  padding: 10px 18px;
+  border-radius: 14px;
+  box-shadow: 0 4px 0 var(--card-edge), 0 8px 18px rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation: card-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  pointer-events: none;
+  z-index: 25;
+  white-space: nowrap;
+}
+.win-toast.closing {
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  opacity: 0;
+  transform: translateX(-50%) translateY(-14px);
+}
+.win-toast .wt-star {
+  color: var(--gold);
+  font-size: 19px;
+}
+.win-toast .wt-reward {
+  color: var(--green);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.loss-card .report-row {
+  margin-top: 14px;
+}
+.report-bar {
+  height: 12px;
+  background: #d8d2c4;
+  border-radius: 999px;
+  overflow: hidden;
+  box-shadow: inset 0 1.5px 2px rgba(0, 0, 0, 0.18);
+}
+.report-fill {
+  height: 100%;
+  background: linear-gradient(180deg, #e35a3e, var(--red));
+  border-radius: 999px;
+}
+.report-label {
+  margin-top: 5px;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--ink);
+  opacity: 0.6;
+}
+.report-salvage {
+  margin-top: 10px;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--green);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+}
+.report-pity {
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--gold-edge);
+}
+
+.unlock-card {
+  overflow: hidden;
+}
+.unlock-card .card-title {
+  color: var(--green);
+  text-shadow: 0 3px 0 var(--green-deep);
+  font-size: 30px;
+}
+.unlock-burst {
+  position: absolute;
+  inset: -60px;
+  background: repeating-conic-gradient(
+    rgba(242, 181, 58, 0.16) 0deg 12deg,
+    transparent 12deg 24deg
+  );
+  animation: burst-spin 14s linear infinite;
+  pointer-events: none;
+}
+@keyframes burst-spin {
+  to { transform: rotate(360deg); }
+}
+.unlock-blurb {
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--ink);
+  opacity: 0.65;
+  position: relative;
+}
+
+.streak-row {
+  display: flex;
+  gap: 4px;
+  margin-top: 14px;
+  justify-content: center;
+}
+.streak-cell {
+  flex: 1;
+  max-width: 40px;
+  background: #fff;
+  border-radius: 9px;
+  padding: 5px 2px;
+  box-shadow: inset 0 0 0 2px var(--card-edge);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: 8px;
+  font-weight: 800;
+  color: var(--ink);
+}
+.streak-cell b {
+  font-size: 10px;
+  color: var(--gold-edge);
+}
+.streak-cell.past {
+  opacity: 0.45;
+}
+.streak-cell.today {
+  box-shadow: inset 0 0 0 2px var(--gold), 0 0 8px rgba(242, 181, 58, 0.6);
+  transform: scale(1.12);
+}
+
+.tree-card {
+  max-width: 348px;
+  max-height: 82vh;
+  overflow-y: auto;
+}
+.tree-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+  margin-top: 14px;
+}
+.tree-node {
+  border: none;
+  font-family: var(--font);
+  background: #fff;
+  border-radius: 12px;
+  padding: 8px 6px;
+  text-align: center;
+  box-shadow: inset 0 0 0 2px var(--card-edge);
+  cursor: pointer;
+}
+.tree-node .tn-name {
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--ink);
+}
+.tree-node .tn-blurb {
+  font-size: 8.5px;
+  font-weight: 800;
+  color: var(--ink);
+  opacity: 0.55;
+  margin-top: 1px;
+}
+.tree-node .tn-rank {
+  font-size: 9px;
+  color: var(--gold-edge);
+  letter-spacing: 2px;
+  margin-top: 2px;
+}
+.tree-node .tn-cost {
+  margin-top: 3px;
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--ink);
+  opacity: 0.7;
+}
+.tree-node.afford {
+  box-shadow: inset 0 0 0 2px var(--gold), 0 2px 0 #b98a20;
+}
+.tree-node.afford .tn-cost {
+  color: var(--gold-edge);
+  opacity: 1;
+}
+.tree-node.maxed {
+  background: #f2ecdd;
+  opacity: 0.75;
+}
+.tree-node.locked {
+  opacity: 0.55;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .prestige-fab {
+  .prestige-fab.hot,
+  .unlock-burst {
     animation: none;
   }
 }

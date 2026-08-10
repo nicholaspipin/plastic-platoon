@@ -58,6 +58,18 @@ const RIM = 'rgba(221,231,240,0.4)'; // cool window-light rim
 
 type Cell = { name: string; w: number; h: number; draw: (c: CanvasRenderingContext2D) => void };
 
+/** The classic bag-of-army-men roster (ART_NOTES pose canon). */
+export type SoldierClass = 'rifle' | 'scout' | 'bazooka' | 'mg' | 'sniper' | 'medic' | 'officer';
+export const SOLDIER_CLASSES: SoldierClass[] = [
+  'rifle',
+  'scout',
+  'bazooka',
+  'mg',
+  'sniper',
+  'medic',
+  'officer',
+];
+
 export function bakeAtlas(): Atlas {
   const cells: Cell[] = [];
 
@@ -66,9 +78,26 @@ export function bakeAtlas(): Atlas {
     ['tan', TAN_P],
   ] as const) {
     const flip = fac === 'tan';
-    cells.push({ name: `${fac}_march0`, w: 48, h: 54, draw: (c) => soldier(c, pal, 'march0', flip) });
-    cells.push({ name: `${fac}_march1`, w: 48, h: 54, draw: (c) => soldier(c, pal, 'march1', flip) });
-    cells.push({ name: `${fac}_fire`, w: 48, h: 54, draw: (c) => soldier(c, pal, 'fire', flip) });
+    for (const kind of SOLDIER_CLASSES) {
+      cells.push({
+        name: `${fac}_${kind}_m0`,
+        w: 48,
+        h: 54,
+        draw: (c) => soldier(c, pal, 'march0', flip, kind),
+      });
+      cells.push({
+        name: `${fac}_${kind}_m1`,
+        w: 48,
+        h: 54,
+        draw: (c) => soldier(c, pal, 'march1', flip, kind),
+      });
+      cells.push({
+        name: `${fac}_${kind}_fire`,
+        w: 48,
+        h: 54,
+        draw: (c) => soldier(c, pal, 'fire', flip, kind),
+      });
+    }
   }
   cells.push({ name: 'robot', w: 76, h: 82, draw: (c) => robot(c, ROBOT_P) });
   cells.push({ name: 'dino', w: 88, h: 74, draw: (c) => dino(c, DINO_P) });
@@ -118,6 +147,7 @@ export function bakeAtlas(): Atlas {
     ctx.restore();
   }
 
+  (window as { __ppAtlas?: HTMLCanvasElement }).__ppAtlas = canvas; // shots tooling peeks at the bake
   const baseTex = Texture.from(canvas);
   const source: TextureSource = baseTex.source;
   source.resolution = S;
@@ -130,6 +160,13 @@ export function bakeAtlas(): Atlas {
       frame: new Rectangle(p.x / S, p.y / S, p.cell.w, p.cell.h),
     });
   }
+  // legacy aliases (v1 renderer names → rifleman)
+  tex.green_march0 = tex.green_rifle_m0;
+  tex.green_march1 = tex.green_rifle_m1;
+  tex.green_fire = tex.green_rifle_fire;
+  tex.tan_march0 = tex.tan_rifle_m0;
+  tex.tan_march1 = tex.tan_rifle_m1;
+  tex.tan_fire = tex.tan_rifle_fire;
   return { tex };
 }
 
@@ -188,14 +225,17 @@ function ovalBase(c: CanvasRenderingContext2D, p: Plastic, cx: number, cy: numbe
 
 /**
  * Classic army man, side view facing right (flip mirrors for tan).
- * Cell 48x54, base center (24, 48). Five-value monochrome, splayed theatrical pose.
- * Tan wears a wide-brim brodie helmet so factions differ in silhouette, not just hue.
+ * Cell 48x54, base center (24, 48). Five-value monochrome, splayed theatrical
+ * poses from the real bag-of-soldiers canon. `kind` swaps the weapon/gear/
+ * headgear layer while sharing the leg/torso rig, so every class gets march +
+ * fire poses cheaply. Tan wears a brodie helmet (silhouette differentiation).
  */
 function soldier(
   c: CanvasRenderingContext2D,
   p: Plastic,
   pose: 'march0' | 'march1' | 'fire',
-  flip: boolean
+  flip: boolean,
+  kind: SoldierClass
 ) {
   c.save();
   if (flip) {
@@ -204,15 +244,23 @@ function soldier(
   }
 
   ovalBase(c, p, 24, 47, 14);
-
   c.lineCap = 'round';
+
+  // bazooka/sniper fire from a knee; the medic kneels to work
+  const crouch = pose === 'fire' && (kind === 'bazooka' || kind === 'sniper' || kind === 'medic');
+  const dy = crouch ? 5 : 0;
 
   // ---- legs (wide theatrical stances)
   c.strokeStyle = p.base;
   c.lineWidth = 5;
-  if (pose === 'march0') {
-    line(c, 22.5, 32, 15.5, 44.5); // back leg, kicked back
-    line(c, 25.5, 32, 32, 44.5); // front leg, striding
+  if (crouch) {
+    line(c, 25.5, 34 + dy - 1, 31, 40); // front thigh
+    line(c, 31, 40, 30.5, 45); // front shin planted
+    line(c, 22.5, 34 + dy - 1, 17, 42.5); // back thigh
+    line(c, 17, 42.5, 23.5, 45); // back shin folded, knee down
+  } else if (pose === 'march0') {
+    line(c, 22.5, 32, 15.5, 44.5);
+    line(c, 25.5, 32, 32, 44.5);
   } else if (pose === 'march1') {
     line(c, 23.5, 32, 20.5, 45);
     line(c, 24.5, 32, 27.5, 45);
@@ -220,114 +268,335 @@ function soldier(
     line(c, 22.5, 32, 16.5, 45); // braced firing stance
     line(c, 25.5, 32, 30, 44.5);
   }
-  // inner-leg crevice
-  c.strokeStyle = p.crev;
-  c.lineWidth = 1.6;
-  if (pose === 'march0') line(c, 24, 33, 22, 41);
-  else if (pose === 'fire') line(c, 24, 33, 22.5, 41);
-  // front-shin light
-  c.strokeStyle = p.light;
-  c.lineWidth = 1.8;
-  if (pose === 'march0') line(c, 26.5, 34, 31, 43);
-  else if (pose === 'march1') line(c, 25.4, 34, 27.2, 43.5);
-  else line(c, 26.5, 34, 29.3, 43);
+  if (!crouch) {
+    // inner-leg crevice + front-shin light
+    c.strokeStyle = p.crev;
+    c.lineWidth = 1.6;
+    if (pose === 'march0') line(c, 24, 33, 22, 41);
+    else if (pose === 'fire') line(c, 24, 33, 22.5, 41);
+    c.strokeStyle = p.light;
+    c.lineWidth = 1.8;
+    if (pose === 'march0') line(c, 26.5, 34, 31, 43);
+    else if (pose === 'march1') line(c, 25.4, 34, 27.2, 43.5);
+    else line(c, 26.5, 34, 29.3, 43);
+  } else {
+    c.strokeStyle = p.light;
+    c.lineWidth = 1.8;
+    line(c, 30.2, 40.5, 30.5, 44); // knee/shin light
+  }
 
   // ---- torso (leaning into the march / braced when firing)
-  const lean = pose === 'fire' ? -0.03 : 0.1;
+  const lean = pose === 'fire' ? (kind === 'bazooka' ? 0.04 : -0.03) : 0.1;
   c.save();
-  c.translate(24, 26);
+  c.translate(24, 26 + dy);
   c.rotate(lean);
   c.fillStyle = p.base;
   rr(c, -5.5, -7.5, 11, 15, 4.5);
   c.fill();
-  // backpack (behind = left)
-  c.fillStyle = p.base;
-  rr(c, -9, -5.5, 4.5, 9, 2);
-  c.fill();
-  c.fillStyle = p.crev;
-  c.globalAlpha = 0.75;
-  rr(c, -9, -5.5, 1.6, 9, 1.5);
-  c.fill();
-  c.globalAlpha = 1;
-  // torso occlusion: trailing edge + under-arm
+  // back gear: pack for most, satchel for medic, nothing for the light scout
+  if (kind === 'medic') {
+    c.fillStyle = p.base;
+    rr(c, -9.5, -3.5, 5, 8, 2);
+    c.fill();
+    c.fillStyle = p.crev;
+    c.globalAlpha = 0.75;
+    rr(c, -9.5, -3.5, 1.6, 8, 1.5);
+    c.fill();
+    c.globalAlpha = 1;
+    // cross on the satchel — reads as the medic signifier
+    c.fillStyle = p.spec;
+    rr(c, -8.1, -1.4, 2.6, 0.9, 0.4);
+    c.fill();
+    rr(c, -7.25, -2.3, 0.9, 2.6, 0.4);
+    c.fill();
+  } else if (kind !== 'scout') {
+    c.fillStyle = p.base;
+    rr(c, -9, -5.5, 4.5, 9, 2);
+    c.fill();
+    c.fillStyle = p.crev;
+    c.globalAlpha = 0.75;
+    rr(c, -9, -5.5, 1.6, 9, 1.5);
+    c.fill();
+    c.globalAlpha = 1;
+  }
+  // torso occlusion: trailing edge
   c.fillStyle = p.crev;
   c.globalAlpha = 0.7;
   rr(c, -5.5, -7.5, 2.6, 15, 3);
   c.fill();
   c.globalAlpha = 1;
-  // chest light
+  // chest light + shoulder sheen
   c.fillStyle = p.light;
   rr(c, 0.6, -6.5, 4.6, 9, 3);
   c.fill();
-  // shoulder sheen
   c.fillStyle = p.sheen;
   ell(c, 2.4, -5.8, 2.6, 1.3, -0.25);
   c.fill();
-  // rim light on backpack top
+  // rim light on the back edge
   c.strokeStyle = RIM;
   c.lineWidth = 1;
-  line(c, -8.6, -5.2, -5.2, -6.8);
+  line(c, -5.2, -7, -5.4, 2);
   c.restore();
 
-  // ---- rifle + arms
-  const gunColor = p.crev;
-  if (pose === 'fire') {
-    // rifle leveled at the shoulder
-    c.strokeStyle = gunColor;
-    c.lineWidth = 2.8;
-    line(c, 19, 22.5, 41.5, 21);
-    // stock
-    c.lineWidth = 4.2;
-    line(c, 19.5, 23, 23.5, 22.6);
-    // foregrip hand + trigger hand
-    c.strokeStyle = p.base;
-    c.lineWidth = 4.4;
-    line(c, 26, 25.5, 32.5, 22.3);
-    line(c, 23.5, 26, 26.5, 24);
-    // barrel spec
-    c.fillStyle = p.spec;
-    ell(c, 36, 20.6, 2.1, 0.7, -0.05);
-    c.fill();
-  } else {
-    // rifle at port arms (diagonal across chest)
-    c.strokeStyle = gunColor;
-    c.lineWidth = 2.8;
-    line(c, 18.5, 28.5, 36.5, 17.5);
-    c.lineWidth = 4;
-    line(c, 18.8, 28.3, 22.3, 26.2);
-    c.strokeStyle = p.base;
-    c.lineWidth = 4.4;
-    line(c, 24, 25.5, 30.5, 21.5);
-    c.fillStyle = p.spec;
-    ell(c, 33, 19.2, 1.9, 0.7, -0.55);
-    c.fill();
-  }
+  // ---- weapon / class gear
+  weaponFor(c, p, pose, kind, dy);
 
-  // ---- head + helmet
-  if (flip) {
-    // TAN: brodie wide-brim helmet (silhouette differentiation)
+  // ---- head + headgear
+  soldierHead(c, p, flip, kind, dy);
+
+  c.restore();
+}
+
+/** Weapon and class-specific gear, drawn in cell coordinates (facing right). */
+function weaponFor(
+  c: CanvasRenderingContext2D,
+  p: Plastic,
+  pose: 'march0' | 'march1' | 'fire',
+  kind: SoldierClass,
+  dy: number
+) {
+  const fire = pose === 'fire';
+  switch (kind) {
+    case 'rifle': {
+      c.strokeStyle = p.crev;
+      c.lineWidth = 2.8;
+      if (fire) {
+        line(c, 19, 22.5, 41.5, 21);
+        c.lineWidth = 4.2;
+        line(c, 19.5, 23, 23.5, 22.6);
+        arm(c, p, 26, 25.5, 32.5, 22.3);
+        arm(c, p, 23.5, 26, 26.5, 24);
+        specDot(c, p, 36, 20.6);
+      } else {
+        line(c, 18.5, 28.5, 36.5, 17.5);
+        c.lineWidth = 4;
+        line(c, 18.8, 28.3, 22.3, 26.2);
+        arm(c, p, 24, 25.5, 30.5, 21.5);
+        specDot(c, p, 33, 19.2, -0.55);
+      }
+      break;
+    }
+    case 'scout': {
+      if (fire) {
+        // sidearm out, still light on his feet
+        c.strokeStyle = p.crev;
+        c.lineWidth = 2.4;
+        line(c, 30, 22.5, 37.5, 21.8);
+        arm(c, p, 25.5, 24.5, 31, 22.5);
+        specDot(c, p, 35, 21.2);
+      } else {
+        // minesweeper wand swept out front, disc skimming the floor
+        c.strokeStyle = p.crev;
+        c.lineWidth = 2.2;
+        line(c, 27, 25.5, 39.5, 42);
+        c.fillStyle = p.base;
+        ell(c, 40.2, 43.4, 4.2, 1.7, -0.1);
+        c.fill();
+        c.fillStyle = p.light;
+        ell(c, 39.6, 42.9, 2.9, 1, -0.1);
+        c.fill();
+        arm(c, p, 25, 24.5, 28.5, 26.5);
+        specDot(c, p, 38.6, 42.4, -0.1);
+      }
+      break;
+    }
+    case 'bazooka': {
+      // tube rides the shoulder; fired from a knee
+      const ty = fire ? 15.5 + dy : 13;
+      const tyB = fire ? 16.5 + dy : 20;
+      c.strokeStyle = p.crev;
+      c.lineWidth = 6.4;
+      if (fire) line(c, 6.5, tyB + 1, 41, ty);
+      else line(c, 12, 27, 38, ty);
+      // tube top sheen
+      c.strokeStyle = p.sheen;
+      c.lineWidth = 1.4;
+      if (fire) line(c, 12, tyB - 1.4, 38, ty - 2.2);
+      else line(c, 15, 24.2, 35.5, ty - 2);
+      // muzzle + venturi openings
+      c.fillStyle = p.crev;
+      if (fire) {
+        ell(c, 41.8, ty - 0.2, 1.7, 3, 0.06);
+        c.fill();
+        ell(c, 5.8, tyB + 1.2, 1.5, 2.7, 0.06);
+        c.fill();
+        arm(c, p, 25, 24 + dy, 30, 19 + dy);
+        arm(c, p, 22, 25 + dy, 26, 21 + dy);
+      } else {
+        ell(c, 38.6, ty - 0.2, 1.6, 2.8, 0.35);
+        c.fill();
+        arm(c, p, 24.5, 25, 29, 22);
+      }
+      specDot(c, p, 33, fire ? ty - 1.4 : ty - 1);
+      break;
+    }
+    case 'mg': {
+      // belt-fed gun carried at the hip, bipod folded under the barrel
+      const gy = fire ? 24.5 : 26;
+      c.strokeStyle = p.crev;
+      c.lineWidth = 4.4;
+      line(c, 18, gy + 1.5, 40, gy);
+      // ammo box under the receiver
+      c.fillStyle = p.crev;
+      rr(c, 23.5, gy + 2.5, 6, 4.5, 1.5);
+      c.fill();
+      c.fillStyle = p.light;
+      rr(c, 24.2, gy + 3.1, 2.2, 1.6, 0.8);
+      c.fill();
+      // folded bipod legs
+      c.strokeStyle = p.crev;
+      c.lineWidth = 1.4;
+      line(c, 35.5, gy + 1.8, 38.5, gy + 5.5);
+      line(c, 35.5, gy + 1.8, 33.5, gy + 5.5);
+      arm(c, p, 24, 25, 29.5, gy + 0.6);
+      arm(c, p, 21.5, 25.5, 25, gy + 1.2);
+      specDot(c, p, 36.5, gy - 1.3);
+      break;
+    }
+    case 'sniper': {
+      // long scoped rifle — the reach reads at a glance
+      const sy = fire ? 20.5 + dy : 0;
+      c.strokeStyle = p.crev;
+      c.lineWidth = 2.2;
+      if (fire) {
+        line(c, 17, sy + 1.6, 45.5, sy);
+        c.lineWidth = 3.6;
+        line(c, 17.5, sy + 1.8, 22, sy + 1.4);
+        // scope
+        c.fillStyle = p.crev;
+        rr(c, 26.5, sy - 2.6, 5.4, 2.4, 1.2);
+        c.fill();
+        c.fillStyle = p.sheen;
+        ell(c, 28, sy - 1.7, 1, 0.6, -0.3);
+        c.fill();
+        arm(c, p, 25, 23 + dy, 33, sy + 1);
+        arm(c, p, 22.5, 24 + dy, 27, sy + 2);
+        specDot(c, p, 41, sy - 0.6);
+      } else {
+        line(c, 17.5, 29.5, 40.5, 15.5);
+        c.fillStyle = p.crev;
+        rr(c, 27.2, 19.4, 5, 2.3, 1.1);
+        c.fill();
+        arm(c, p, 24, 25.5, 30.5, 21.5);
+        specDot(c, p, 37, 17.4, -0.55);
+      }
+      break;
+    }
+    case 'medic': {
+      if (fire) {
+        // kneeling, hands working forward-low (patching a buddy)
+        arm(c, p, 25, 23 + dy, 32.5, 36);
+        arm(c, p, 23, 24 + dy, 30, 37.5);
+        c.fillStyle = p.spec;
+        ell(c, 32.5, 37, 1.5, 1, -0.3);
+        c.fill();
+      } else {
+        // double-time arm pump, no weapon
+        arm(c, p, 25, 24.5, 31, 20.5);
+        arm(c, p, 22.5, 25.5, 17.5, 29.5);
+      }
+      break;
+    }
+    case 'officer': {
+      // sidearm raised, leading from the front
+      c.strokeStyle = p.crev;
+      c.lineWidth = 2.4;
+      if (fire) {
+        arm(c, p, 26, 22, 36, 19.5);
+        line(c, 36, 19.3, 41, 18.6);
+        line(c, 40, 18.7, 40.2, 20.6);
+        specDot(c, p, 39, 18);
+      } else {
+        arm(c, p, 25.5, 23.5, 31.5, 15.5);
+        line(c, 31.5, 15.3, 35, 12.8);
+        arm(c, p, 22.5, 25.5, 18, 30);
+      }
+      break;
+    }
+  }
+}
+
+function arm(c: CanvasRenderingContext2D, p: Plastic, x1: number, y1: number, x2: number, y2: number) {
+  c.strokeStyle = p.base;
+  c.lineWidth = 4.4;
+  line(c, x1, y1, x2, y2);
+}
+
+function specDot(c: CanvasRenderingContext2D, p: Plastic, x: number, y: number, rot = -0.05) {
+  c.fillStyle = p.spec;
+  ell(c, x, y, 2, 0.7, rot);
+  c.fill();
+}
+
+/** Head + headgear: green pot helmet, tan brodie, or officer's peaked cap. */
+function soldierHead(
+  c: CanvasRenderingContext2D,
+  p: Plastic,
+  flip: boolean,
+  kind: SoldierClass,
+  dy: number
+) {
+  c.save();
+  c.translate(0, dy);
+  if (kind === 'officer') {
+    // head ball + face shadow
     c.fillStyle = p.base;
-    ell(c, 24.5, 15.5, 5.2, 4.4); // head ball
+    ell(c, 24.5, 15.5, 5, 4.2);
+    c.fill();
+    c.fillStyle = p.crev;
+    c.globalAlpha = 0.55;
+    ell(c, 24.8, 17, 4.2, 2.2);
+    c.fill();
+    c.globalAlpha = 1;
+    // peaked cap: crown, band, forward brim
+    c.fillStyle = p.base;
+    ell(c, 24.2, 11.6, 6.4, 3.1, -0.06);
+    c.fill();
+    c.fillStyle = p.crev;
+    rr(c, 18.6, 13, 11.6, 2, 1);
+    c.fill();
+    c.fillStyle = p.crev;
+    c.beginPath();
+    c.moveTo(28.5, 14.8);
+    c.lineTo(34.2, 13.9);
+    c.lineTo(28.8, 13.2);
+    c.closePath();
+    c.fill();
+    c.fillStyle = p.light;
+    ell(c, 23, 10.8, 4.4, 1.8, -0.1);
+    c.fill();
+    c.fillStyle = p.sheen;
+    ell(c, 22.2, 10, 2.2, 0.9, -0.3);
+    c.fill();
+    c.fillStyle = p.spec;
+    ell(c, 22.8, 9.5, 1.2, 0.6, -0.3);
+    c.fill();
+    c.strokeStyle = RIM;
+    c.lineWidth = 1;
+    c.beginPath();
+    c.ellipse(24.2, 11.6, 6, 2.8, -0.06, Math.PI * 1.1, Math.PI * 1.5);
+    c.stroke();
+  } else if (flip) {
+    // TAN: brodie wide-brim helmet
+    c.fillStyle = p.base;
+    ell(c, 24.5, 15.5, 5.2, 4.4);
     c.fill();
     c.fillStyle = p.crev;
     c.globalAlpha = 0.6;
-    ell(c, 24.5, 17.2, 4.6, 2.6); // face in brim shadow
+    ell(c, 24.5, 17.2, 4.6, 2.6);
     c.fill();
     c.globalAlpha = 1;
-    // dome
     c.fillStyle = p.base;
     c.beginPath();
     c.arc(24.5, 12.8, 5.6, Math.PI, 0);
     c.closePath();
     c.fill();
-    // wide brim
     c.fillStyle = p.base;
     ell(c, 24.5, 13.2, 9.4, 2.5);
     c.fill();
     c.fillStyle = p.light;
     ell(c, 23.6, 12.4, 8, 1.7);
     c.fill();
-    // dome light + sheen + spec
     c.fillStyle = p.light;
     c.beginPath();
     c.arc(23.8, 12.4, 4.4, Math.PI, 0);
@@ -339,7 +608,6 @@ function soldier(
     c.fillStyle = p.spec;
     ell(c, 23.6, 9.1, 1.4, 0.7, -0.3);
     c.fill();
-    // rim on brim back edge
     c.strokeStyle = RIM;
     c.lineWidth = 1;
     c.beginPath();
@@ -348,11 +616,11 @@ function soldier(
   } else {
     // GREEN: M1 pot helmet
     c.fillStyle = p.base;
-    ell(c, 24.5, 16, 5, 4.2); // head ball
+    ell(c, 24.5, 16, 5, 4.2);
     c.fill();
     c.fillStyle = p.crev;
     c.globalAlpha = 0.6;
-    ell(c, 24.8, 17.4, 4.2, 2.4); // face in helmet shadow
+    ell(c, 24.8, 17.4, 4.2, 2.4);
     c.fill();
     c.globalAlpha = 1;
     c.fillStyle = p.base;
@@ -362,32 +630,27 @@ function soldier(
     c.lineTo(19, 18.4);
     c.quadraticCurveTo(17, 17.6, 17.55, 14);
     c.fill();
-    // under-brim crevice
     c.fillStyle = p.crev;
     c.beginPath();
     c.rect(18.6, 16.9, 12, 1.5);
     c.fill();
-    // dome light
     c.fillStyle = p.light;
     c.beginPath();
     c.arc(23.6, 13.6, 5.2, Math.PI, Math.PI * 1.98);
     c.closePath();
     c.fill();
-    // sheen crescent + hard spec
     c.fillStyle = p.sheen;
     ell(c, 22.4, 10.4, 3.1, 1.4, -0.35);
     c.fill();
     c.fillStyle = p.spec;
     ell(c, 23.2, 9.4, 1.5, 0.8, -0.35);
     c.fill();
-    // cool rim on the helmet back edge
     c.strokeStyle = RIM;
     c.lineWidth = 1;
     c.beginPath();
     c.arc(24.5, 14, 6.6, Math.PI * 1.02, Math.PI * 1.35);
     c.stroke();
   }
-
   c.restore();
 }
 

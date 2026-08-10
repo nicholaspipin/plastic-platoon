@@ -1,11 +1,18 @@
 import './ui/style.css';
-import { SIM_DT } from './sim/defs';
+import { BATTLE, SIM_DT, STREAK, type ClassId, type TreeNodeId } from './sim/defs';
 import { Sim } from './sim/sim';
 import { applySave, loadGame, saveGame, clearSave } from './sim/save';
 import { computeOffline } from './sim/offline';
 import { Renderer } from './render/renderer';
 import { Hud } from './ui/hud';
-import { showOfflineCard, PrestigeUi } from './ui/cards';
+import {
+  showOfflineCard,
+  showWinToast,
+  showLossCard,
+  showUnlockCard,
+  showStreakCard,
+  PrestigeUi,
+} from './ui/cards';
 import { Sfx } from './audio/sfx';
 
 const params = new URLSearchParams(location.search);
@@ -29,39 +36,74 @@ const uiEl = document.getElementById('ui')!;
 const hud = new Hud(
   uiEl,
   {
-    onBuy: (id) => {
-      sfx.unlock(); // a buy may be the returning player's first gesture
-      sim.buy(id);
+    onBuyClass: (cls: ClassId) => {
+      sfx.unlock();
+      sim.buyClass(cls);
+    },
+    onBuyMolderRate: () => {
+      sfx.unlock();
+      sim.buyMolderRate();
+    },
+    onBuyMoldSize: () => {
+      sfx.unlock();
+      sim.buyMoldSize();
+    },
+    onToggleProgram: (cls: ClassId) => {
+      sfx.unlock();
+      sim.toggleProgram(cls);
+    },
+    onAttack: () => {
+      sfx.unlock();
+      sim.startBattle();
+      if (navigator.vibrate) navigator.vibrate(10);
+    },
+    onClaimMission: (slot) => {
+      sfx.unlock();
+      if (sim.claimMission(slot)) {
+        const fake = { type: 'buy', id: 'mission' } as const;
+        sfx.handleEvent(fake);
+        persist();
+      }
     },
     onMute: (muted) => {
       sfx.unlock();
       sfx.muted = muted;
       persist();
     },
-    onStart: () => {},
   },
   save?.muted ?? false
 );
 sfx.muted = save?.muted ?? false;
 
-const prestigeUi = new PrestigeUi(uiEl, () => {
-  sim.prestige();
-  renderer.refreshStuds(sim);
-  persist();
-});
+const prestigeUi = new PrestigeUi(
+  uiEl,
+  () => {
+    sim.prestige();
+    renderer.refreshStuds(sim);
+    renderer.rebakeGround(sim.zone);
+    persist();
+  },
+  (id: TreeNodeId) => {
+    sfx.unlock();
+    if (sim.buyTreeNode(id)) {
+      const fake = { type: 'buy', id: 'tree' } as const;
+      sfx.handleEvent(fake);
+      persist();
+    }
+  }
+);
 
-// frame-time ring buffer for the perf probe (cheap: one write per frame)
+// frame-time ring buffer for the perf probe
 const frameTimes = new Float32Array(1200);
 let frameIdx = 0;
 let frameCount = 0;
 
-let hitStop = 0; // seconds of sim freeze (render keeps running)
+let hitStop = 0;
 
 async function boot() {
   await renderer.init(gameEl, sim);
 
-  // input: tap anywhere on the battlefield = rubber band snap.
-  // ~80ms anticipation between the tap and the snap itself (juice table §4.4).
+  // input: tap the battlefield = rubber band snap (80ms anticipation)
   let bandPending = false;
   renderer.app.canvas.addEventListener('pointerdown', (e: PointerEvent) => {
     sfx.unlock();
@@ -94,15 +136,31 @@ async function boot() {
 
   prestigeUi.bind(sim);
 
-  // offline earnings: one card max at session start (returning players only).
-  // Scrap is granted IMMEDIATELY — the save's lastSeen advances within seconds,
-  // so a claim-gated grant would be forfeited by any reload before the tap.
+  // offline earnings (grant immediately; card is the celebration)
   if (save && seenIntro) {
-    const offline = computeOffline(save);
+    const offline = computeOffline(save, sim.offlineCapHours);
     if (offline) grantOffline(offline.scrap, offline.seconds);
   }
 
-  let lastZone = sim.state.zone;
+  // daily streak (after the offline card so they don't stack awkwardly)
+  if (!nosave && seenIntro) {
+    const day = sim.advanceStreak();
+    if (day > 0) {
+      const reward = Math.round(
+        BATTLE.rewardBase * Math.pow(BATTLE.rewardGrowth, sim.state.battle - 1) * STREAK.rewardMult[day - 1] * 3
+      );
+      setTimeout(() => {
+        showStreakCard(uiEl, day, reward, () => {
+          sim.addScrap(reward / sim.scrapMult); // addScrap re-applies the multiplier
+          if (day === STREAK.days) sim.activateBoost(STREAK.boostMinutes);
+          sfx.handleEvent({ type: 'buy', id: 'streak' });
+          persist();
+        });
+      }, 600);
+    }
+  }
+
+  let lastZone = sim.zone;
   let last = performance.now();
   let acc = 0;
 
@@ -125,28 +183,50 @@ async function boot() {
       acc -= SIM_DT;
       steps++;
     }
-    // spiral-of-death guard; clamp (not zero) keeps interpolation monotonic
     if (steps === 6 && acc > SIM_DT) acc = SIM_DT * 0.999;
 
-    // drain events to all consumers
     for (const e of sim.events) {
       renderer.handleEvent(e, sim);
       hud.handleEvent(e, sim);
       sfx.handleEvent(e);
-      // hit-stop freezes the sim, never render or audio; reduced-motion
-      // users get the renderer's flash effects instead
-      if (e.type === 'kill' && e.kind !== 'soldier') {
-        if (!renderer.reducedMotion) hitStop = Math.max(hitStop, 0.07);
-        if (navigator.vibrate) navigator.vibrate(25);
-      } else if (e.type === 'buy' && navigator.vibrate) {
-        navigator.vibrate(8);
+      switch (e.type) {
+        case 'kill':
+          if (e.kind !== 'soldier') {
+            if (!renderer.reducedMotion) hitStop = Math.max(hitStop, 0.07);
+            if (navigator.vibrate) navigator.vibrate(25);
+          }
+          break;
+        case 'buy':
+          if (navigator.vibrate) navigator.vibrate(8);
+          break;
+        case 'battleWon': {
+          showWinToast(uiEl, e.battle, e.reward);
+          if (e.unlock) {
+            const cls = e.unlock;
+            setTimeout(() => showUnlockCard(uiEl, cls, () => persist()), 900);
+          }
+          if (navigator.vibrate) navigator.vibrate([20, 40, 20]);
+          persist();
+          break;
+        }
+        case 'battleLost': {
+          showLossCard(
+            uiEl,
+            { battle: e.battle, remaining: e.remaining, reward: e.reward, pity: sim.pity },
+            () => sim.startBattle()
+          );
+          if (navigator.vibrate) navigator.vibrate(60);
+          persist();
+          break;
+        }
+        default:
+          break;
       }
     }
     sim.events.length = 0;
 
-    // zone shift: rebake the diorama when the battlefield moves rooms
-    if (sim.state.zone !== lastZone) {
-      lastZone = sim.state.zone;
+    if (sim.zone !== lastZone) {
+      lastZone = sim.zone;
       renderer.rebakeGround(lastZone);
     }
 
@@ -164,23 +244,22 @@ function persist() {
 }
 
 setInterval(persist, 5000);
-// iOS PWAs resume from memory rather than reloading, so the load-time offline
-// check never re-runs — do it on visibility return after a long background too.
+
 let hiddenAt = 0;
 let offlineCardOpen = false;
 
 function grantOffline(scrap: number, seconds: number) {
   sim.state.scrap += scrap;
-  sim.state.totalScrapEarned += scrap;
+  sim.state.lifetimeScrap += scrap;
   persist();
-  if (offlineCardOpen) return; // never stack receipt cards
+  if (offlineCardOpen) return;
   offlineCardOpen = true;
   showOfflineCard(uiEl, { scrap, seconds }, () => {
     offlineCardOpen = false;
     sfx.unlock();
-    const fake = { type: 'buy', id: 'faster' } as const;
+    const fake = { type: 'buy', id: 'offline' } as const;
     sfx.handleEvent(fake);
-    renderer.handleEvent(fake, sim); // the molder celebrates the claim
+    renderer.handleEvent(fake, sim);
   });
 }
 
@@ -189,9 +268,9 @@ document.addEventListener('visibilitychange', () => {
     hiddenAt = Date.now();
     persist();
   } else {
-    sfx.unlock(); // recover from iOS 'interrupted' audio state
+    sfx.unlock();
     if (hiddenAt > 0 && !nosave) {
-      const offline = computeOffline({ lastSeen: hiddenAt, scrapRate: sim.scrapRate });
+      const offline = computeOffline({ lastSeen: hiddenAt, scrapRate: sim.scrapRate }, sim.offlineCapHours);
       hiddenAt = 0;
       if (offline) grantOffline(offline.scrap, offline.seconds);
     }
@@ -199,21 +278,21 @@ document.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('pagehide', persist);
 
-// service worker (production only; dev caching is misery)
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => {});
   });
 }
 
-// dev/test hooks for screenshots + perf probe
+// dev/test hooks for screenshots + probes
 declare global {
   interface Window {
     __pp: {
       sim: Sim;
       ff: (seconds: number) => void;
       setScrap: (n: number) => void;
-      buy: (id: 'faster' | 'bigger' | 'rifles' | 'scouts') => boolean;
+      buyClass: (cls: ClassId) => boolean;
+      attack: () => void;
       resetSave: () => void;
       saveNow: () => void;
       hitStop: (ms: number) => void;
@@ -227,6 +306,7 @@ declare global {
       };
       resetFrames: () => void;
     };
+    __ppAtlas?: HTMLCanvasElement;
   }
 }
 
@@ -236,7 +316,8 @@ window.__pp = {
   setScrap: (n) => {
     sim.state.scrap = n;
   },
-  buy: (id) => sim.buy(id),
+  buyClass: (cls) => sim.buyClass(cls),
+  attack: () => sim.startBattle(),
   resetSave: () => {
     clearSave();
     location.reload();
@@ -262,7 +343,6 @@ window.__pp = {
 };
 
 boot().catch((err) => {
-  // WebGL denied / init failure: show something instead of a black void
   const card = document.createElement('div');
   card.className = 'intro-overlay';
   card.innerHTML = `<div class="intro-card"><div class="intro-brand">OUT OF<br>BATTERIES</div>

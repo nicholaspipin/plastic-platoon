@@ -39,15 +39,20 @@ const renderer = await page.evaluate(() => {
 });
 console.log('WebGL renderer:', renderer);
 
-// Build a worst-case battlefield: 3+ sim-minutes at high wave, maxed-out molds,
-// battalion cap saturated, then let real frames run and measure.
+// Build a worst-case battlefield: a late commander battle at full army cap,
+// every class fielded, battalion reserve saturated, then measure live frames.
 await page.evaluate(() => {
   const pp = window.__pp;
   pp.setScrap(1e9);
-  for (let i = 0; i < 8; i++) pp.buy('faster');
-  for (let i = 0; i < 10; i++) pp.buy('bigger');
-  pp.sim.state.wave = 40; // heavy waves, boss cadence included
-  pp.ff(200); // 3+ minutes of simulated play at high wave count
+  for (let i = 0; i < 8; i++) pp.sim.buyMolderRate();
+  for (let i = 0; i < 10; i++) pp.sim.buyMoldSize();
+  pp.sim.state.battle = 35; // commander cadence + max troop count
+  for (const c of ['rifle', 'scout', 'mg', 'medic', 'bazooka', 'sniper', 'officer']) {
+    for (let i = 0; i < 12; i++) pp.buyClass(c);
+  }
+  pp.ff(120); // saturate the army + reserve
+  pp.attack();
+  pp.ff(30); // mid-battle
 });
 
 // warmup, then measure two windows: pure rendering, then rendering + taps.
@@ -74,9 +79,9 @@ console.log(
 const units = await page.evaluate(
   () => window.__pp.sim.units.filter((u) => u.active).length
 );
-const wave = await page.evaluate(() => window.__pp.sim.state.wave);
+const battle = await page.evaluate(() => window.__pp.sim.state.battle);
 
-console.log(`active units: ${units}, wave: ${wave}`);
+console.log(`active units: ${units}, battle: ${battle}, mode: ${await page.evaluate(() => window.__pp.sim.mode)}`);
 console.log(
   `frames n=${stats.n}  p50=${stats.p50.toFixed(2)}ms  p95=${stats.p95.toFixed(2)}ms  p99=${stats.p99.toFixed(2)}ms`
 );

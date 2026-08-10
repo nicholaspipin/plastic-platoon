@@ -1,5 +1,5 @@
 import { Application, Container, Sprite, Texture } from 'pixi.js';
-import { LAYOUT } from '../sim/defs';
+import { CLASS_ORDER, LAYOUT, type ClassId } from '../sim/defs';
 import type { Sim, SimEvent } from '../sim/sim';
 import { bakeAtlas, type Atlas } from './atlas';
 import { bakeGround } from './ground';
@@ -57,13 +57,18 @@ export class Renderer {
   private rings: RingFx[] = [];
   private flashes: Flash[] = [];
   private shards: Shard[] = [];
-  private marchTex: Texture[][] = [];
-  private fireTex: Texture[] = [];
+  // [faction][classIndex] → textures; class index follows CLASS_ORDER
+  private clsMarch: Texture[][][] = [];
+  private clsFire: Texture[][] = [];
   private molderBase!: Sprite;
   private piston!: Sprite;
   private pellets!: Sprite;
   private studs: Sprite[] = [];
   private celebration!: Sprite; // additive flash over the molder on upgrade
+  private clsIndex!: Record<ClassId, number>;
+  private hpBarBack!: Sprite;
+  private hpBarFill!: Sprite;
+  private molderFlashT = 0;
   private stampAnim = 0;
   private groundSprite: Sprite | null = null;
   private tiltTop: Sprite | null = null;
@@ -97,11 +102,17 @@ export class Renderer {
     });
 
     this.atlas = bakeAtlas();
-    this.marchTex = [
-      [this.atlas.tex.green_march0, this.atlas.tex.green_march1],
-      [this.atlas.tex.tan_march0, this.atlas.tex.tan_march1],
-    ];
-    this.fireTex = [this.atlas.tex.green_fire, this.atlas.tex.tan_fire];
+    for (const fac of ['green', 'tan']) {
+      const march: Texture[][] = [];
+      const fire: Texture[] = [];
+      for (const cls of CLASS_ORDER) {
+        march.push([this.atlas.tex[`${fac}_${cls}_m0`], this.atlas.tex[`${fac}_${cls}_m1`]]);
+        fire.push(this.atlas.tex[`${fac}_${cls}_fire`]);
+      }
+      this.clsMarch.push(march);
+      this.clsFire.push(fire);
+    }
+    this.clsIndex = Object.fromEntries(CLASS_ORDER.map((c, i) => [c, i])) as Record<ClassId, number>;
 
     this.world.addChild(
       this.groundLayer,
@@ -188,6 +199,15 @@ export class Renderer {
       this.unitLayer.addChild(s);
       this.studs.push(s);
     }
+    // molder HP bar (visible in battle / while damaged)
+    this.hpBarBack = new Sprite(Texture.WHITE);
+    this.hpBarBack.tint = 0x2a1a10;
+    this.hpBarBack.alpha = 0.85;
+    this.hpBarBack.visible = false;
+    this.hpBarFill = new Sprite(Texture.WHITE);
+    this.hpBarFill.tint = 0x67c23c;
+    this.hpBarFill.visible = false;
+    this.fxLayer.addChild(this.hpBarBack, this.hpBarFill);
 
     this.layout(sim);
     this.refreshStuds(sim);
@@ -211,8 +231,8 @@ export class Renderer {
     sim.resize(this.w, this.h);
     // rebake when the room OR the viewport changed (iOS toolbar collapse and
     // rotation resize the canvas; a stale bake mis-sizes ground + blur bands)
-    if (this.groundZone !== sim.state.zone || this.bakedW !== this.w || this.bakedH !== this.h) {
-      this.rebakeGround(sim.state.zone);
+    if (this.groundZone !== sim.zone || this.bakedW !== this.w || this.bakedH !== this.h) {
+      this.rebakeGround(sim.zone);
     }
     const my = this.h * LAYOUT.molderY;
     this.molderBase.position.set(LAYOUT.molderX, my);
@@ -232,11 +252,8 @@ export class Renderer {
   }
 
   refreshStuds(sim: Sim) {
-    const total =
-      sim.state.upgrades.faster +
-      sim.state.upgrades.bigger +
-      sim.state.upgrades.rifles +
-      sim.state.upgrades.scouts;
+    // studs mark molder upgrade levels (rate + size), capped at the row
+    const total = sim.state.molderRateLv + sim.state.moldSizeLv;
     for (let i = 0; i < this.studs.length; i++) this.studs[i].visible = i < total;
   }
 
@@ -255,7 +272,8 @@ export class Renderer {
       this.tiltBottom?.destroy({ texture: true, textureSource: true });
       this.tiltTop = this.tiltBottom = null;
     }
-    const bake = bakeGround(this.w, this.h, zone, mulberry32(1234 + zone));
+    // theaters cycle through the baked room variants
+    const bake = bakeGround(this.w, this.h, zone % 2, mulberry32(1234 + zone));
     this.groundSprite = new Sprite(bake.texture);
     // explicit sizing: Texture.from(canvas) fixes its frame at creation, so a
     // later source.resolution change does not shrink it — set logical size here
@@ -363,6 +381,31 @@ export class Renderer {
         // victim flinch: brief squash so every landed shot reads on the target
         const u = sim.units[e.i];
         if (u.active && u.state !== 'dying') this.hitT[e.i] = 0.001;
+        break;
+      }
+      case 'heal': {
+        // soft green sparkle over the patched soldier
+        for (const f of this.flashes) {
+          if (f.spr.visible) continue;
+          f.spr.visible = true;
+          f.spr.tint = 0x9ef07f;
+          f.spr.position.set(e.tx, e.ty - 30);
+          f.spr.rotation = 0;
+          f.spr.scale.set(1.4);
+          f.spr.alpha = 0.85;
+          f.t = -0.35;
+          break;
+        }
+        break;
+      }
+      case 'molderHit': {
+        this.molderFlashT = 0.12;
+        this.addTrauma(0.24);
+        break;
+      }
+      case 'battleWon': {
+        this.addTrauma(0.4);
+        this.spawnShards(LAYOUT.molderX + 40, this.h * 0.5, 16, 0xd9a62e, 1.3);
         break;
       }
       case 'buy': {
@@ -478,6 +521,30 @@ export class Renderer {
       (Math.random() * 2 - 1) * mag * 0.7 + this.kickY
     );
 
+    // ---- molder HP bar + damage flash
+    const showBar = sim.mode === 'battle' || sim.molderHp < sim.molderHpMax - 0.01;
+    if (this.hpBarBack.visible !== showBar) {
+      this.hpBarBack.visible = showBar;
+      this.hpBarFill.visible = showBar;
+    }
+    if (showBar) {
+      const frac = Math.max(0, sim.molderHp / sim.molderHpMax);
+      const bx = LAYOUT.molderX - 52;
+      const by = this.h * LAYOUT.molderY - 196;
+      this.hpBarBack.position.set(bx, by);
+      this.hpBarBack.width = 104;
+      this.hpBarBack.height = 7;
+      this.hpBarFill.position.set(bx + 1.5, by + 1.5);
+      this.hpBarFill.width = Math.max(0.001, 101 * frac);
+      this.hpBarFill.height = 4;
+      this.hpBarFill.tint = frac > 0.5 ? 0x67c23c : frac > 0.25 ? 0xd9a62e : 0xe5484d;
+    }
+    if (this.molderFlashT > 0) {
+      this.molderFlashT -= dt;
+      this.molderBase.tint = 0xff9a8a;
+      if (this.molderFlashT <= 0) this.molderBase.tint = 0xffffff;
+    }
+
     // ---- molder: slam anim + idle breathing (nothing is ever fully static)
     if (this.stampAnim > 0) this.stampAnim = Math.max(0, this.stampAnim - dt * 4.2);
     const a = this.stampAnim;
@@ -520,15 +587,18 @@ export class Renderer {
       let tex: Texture;
       if (u.kind === 'robot') tex = this.atlas.tex.robot;
       else if (u.kind === 'dino') tex = this.atlas.tex.dino;
-      else if (u.state === 'fight') tex = this.fireTex[u.faction];
       else {
-        // march on twos: 2-frame cycle stepped (~12fps handmade feel)
-        const frame = Math.floor(t * 6 + u.phase * 2) % 2;
-        tex = this.marchTex[u.faction][frame];
+        const ci = this.clsIndex[u.cls];
+        if (u.state === 'fight') tex = this.clsFire[u.faction][ci];
+        else {
+          // march on twos: 2-frame cycle stepped (~12fps handmade feel)
+          const frame = Math.floor(t * 6 + u.phase * 2) % 2;
+          tex = this.clsMarch[u.faction][ci][frame];
+        }
       }
       if (body.texture !== tex) body.texture = tex;
       // zone skin: under the bed, the invaders are dusty gray-blue
-      const wantTint = this.groundZone === 1 && u.faction === 1 ? 0xc9cede : 0xffffff;
+      const wantTint = this.groundZone % 2 === 1 && u.faction === 1 ? 0xc9cede : 0xffffff;
       if (body.tint !== wantTint) body.tint = wantTint;
 
       let rot = this.lean[i];

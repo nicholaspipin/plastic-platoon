@@ -1,5 +1,6 @@
-// Screenshot self-review loop: deterministic captures at the brief's four checkpoints.
-// Usage: node scripts/shots.mjs [baseUrl]   (default http://localhost:4173/plastic-platoon/)
+// Screenshot self-review loop, v2: load, first battle, mid-game battle,
+// upgrade moment, theater 2. Deterministic via ?seed + __pp hooks.
+// Usage: node scripts/shots.mjs [baseUrl]
 import { chromium } from 'playwright';
 import { mkdirSync } from 'fs';
 
@@ -38,76 +39,75 @@ async function dismissIntro() {
   }
 }
 
+/** ff until battle tans are visibly on screen mid-fight. */
+async function intoCombat(extraFf = 0.5) {
+  await page.evaluate((extra) => {
+    const pp = window.__pp;
+    pp.attack();
+    let guard = 0;
+    while (
+      (pp.sim.countActive(1) < 5 ||
+        !pp.sim.units.some((u) => u.active && u.faction === 1 && u.x < pp.sim.w * 0.9)) &&
+      guard++ < 400
+    ) {
+      pp.ff(0.25);
+    }
+    pp.ff(extra);
+  }, extraFf);
+  await page.waitForTimeout(1200);
+}
+
 // 1. initial load (intro card up)
 await shot('1-load', null);
 
-// 2. first kill (~5s in)
-await shot('2-first-kill', async () => {
+// 2. battle 1, first exchange of fire
+await shot('2-first-battle', async () => {
   await dismissIntro();
-  await page.evaluate(() => window.__pp.ff(4));
-  // let real frames run so VFX/anim state is alive
-  await page.waitForTimeout(1600);
+  await page.evaluate(() => window.__pp.ff(6)); // a few stamps first
+  await intoCombat(1.5);
 });
 
-// 3. mid-battle (~60s simulated, upgrades bought like a real player;
-//    fast-forward until tans are actually on screen so the shot shows combat)
+// 3. mid-game: battle 9 with several classes fielded
 await shot('3-mid-battle', async () => {
   await dismissIntro();
   await page.evaluate(() => {
     const pp = window.__pp;
-    pp.ff(30);
-    pp.buy('faster');
-    pp.buy('bigger');
-    pp.ff(28);
-    let guard = 0;
-    while (
-      (pp.sim.countActive(1) < 8 ||
-        pp.sim.units.some((u) => u.active && u.faction === 1 && u.x > pp.sim.w * 0.92)) &&
-      guard++ < 240
-    ) {
-      pp.ff(0.25);
-    }
-    pp.ff(0.3); // the exchange of fire is starting — freeze it here
+    pp.sim.state.battle = 9;
+    pp.setScrap(3000);
+    for (let i = 0; i < 5; i++) pp.buyClass('rifle');
+    for (let i = 0; i < 3; i++) pp.buyClass('scout');
+    for (let i = 0; i < 2; i++) pp.buyClass('mg');
+    pp.sim.state.scrap = 400;
+    pp.ff(20); // build the army
   });
-  await page.waitForTimeout(1600);
+  await intoCombat(1);
 });
 
-// 4. upgrade purchase moment
+// 4. upgrade purchase moment (unit card tap)
 await shot('4-upgrade', async () => {
   await dismissIntro();
   await page.evaluate(() => {
-    window.__pp.ff(20);
-    window.__pp.setScrap(500);
+    window.__pp.ff(15);
+    window.__pp.setScrap(800);
   });
   await page.waitForTimeout(300);
-  // force: the affordable-pulse animation means the button is never "stable"
-  await page.tap('.buy-btn', { force: true });
+  await page.locator('.unit-card .uc-buy').first().tap({ force: true });
   await page.waitForTimeout(220);
 });
 
-// 5. zone 2: Under the Bed
+// 5. theater 2 (Under the Bed), commander battle
 await shot('5-zone2', async () => {
   await dismissIntro();
   await page.evaluate(() => {
     const pp = window.__pp;
-    pp.setScrap(3000);
-    pp.buy('faster');
-    pp.buy('faster');
-    pp.buy('bigger');
-    pp.buy('bigger');
-    pp.sim.state.wave = 15;
-    let guard = 0;
-    while (pp.sim.state.zone < 1 && guard++ < 90) pp.ff(1);
-    guard = 0;
-    while (
-      (pp.sim.countActive(1) < 6 ||
-        pp.sim.units.some((u) => u.active && u.faction === 1 && u.x > pp.sim.w * 0.92)) &&
-      guard++ < 240
-    ) {
-      pp.ff(0.25);
+    pp.sim.state.battle = 25;
+    pp.setScrap(60000);
+    for (const c of ['rifle', 'scout', 'mg', 'medic', 'bazooka']) {
+      for (let i = 0; i < 10; i++) pp.buyClass(c);
     }
+    pp.ff(25);
   });
-  await page.waitForTimeout(1600);
+  await intoCombat(1);
 });
 
 if (errors.length) {

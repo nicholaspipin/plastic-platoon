@@ -94,6 +94,37 @@ export class Sfx {
       case 'waveStart':
         this.drumroll(t);
         break;
+      case 'battleStart':
+        this.drumroll(t);
+        this.tone(t + 0.5, 330, 0.12, 0.2);
+        break;
+      case 'surge':
+        // alarm: the charge is coming
+        this.tone(t, 440, 0.12, 0.3, 'square', 420);
+        this.tone(t + 0.16, 440, 0.12, 0.3, 'square', 420);
+        this.tone(t + 0.32, 494, 0.2, 0.32, 'square', 460);
+        this.drumroll(t + 0.1);
+        break;
+      case 'battleWon':
+        // toy bugle fanfare
+        this.tone(t, 523, 0.12, 0.3, 'triangle');
+        this.tone(t + 0.12, 659, 0.12, 0.3, 'triangle');
+        this.tone(t + 0.24, 784, 0.3, 0.34, 'triangle');
+        this.tone(t + 0.24, 1568, 0.2, 0.08);
+        break;
+      case 'battleLost':
+        // deflating two-note — sad but soft; losses must not sting
+        this.tone(t, 330, 0.22, 0.26, 'triangle', 311);
+        this.tone(t + 0.24, 262, 0.4, 0.26, 'triangle', 233);
+        break;
+      case 'molderHit':
+        this.noise(t, 0.06, 700, 1.2, 0.22, 'lowpass');
+        this.tone(t, 150, 0.08, 0.24, 'sine', 90);
+        break;
+      case 'milestone':
+        this.chime(t);
+        this.tone(t + 0.2, 1320, 0.25, 0.2, 'triangle');
+        break;
       default:
         break;
     }
