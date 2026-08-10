@@ -8,7 +8,8 @@ import { Sprite, Texture } from 'pixi.js';
  *
  * Band geometry (fractions of H):
  *   full blur 0 → 0.27, ramp to sharp by 0.39 | sharp 0.39 → 0.71 | ramp to
- *   full blur by 0.83 → 1. Units live in 0.41–0.73 so they stay sharp.
+ *   full blur by 0.80 → 1. Units live in 0.41–0.73; only the extreme bottom of
+ *   the band gets a light veil, which reads as depth.
  */
 
 export interface TiltShift {
@@ -47,7 +48,7 @@ export function bakeTiltShift(
 
   const bottom = strip(blurred, scale, botY, botH, (g) => {
     g.addColorStop(0, 'rgba(0,0,0,0)');
-    g.addColorStop((0.83 - 0.71) / (1 - 0.71), 'rgba(0,0,0,1)');
+    g.addColorStop((0.8 - 0.71) / (1 - 0.71), 'rgba(0,0,0,1)');
     g.addColorStop(1, 'rgba(0,0,0,1)');
   });
   bottom.sprite.position.set(0, botY);

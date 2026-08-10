@@ -299,9 +299,10 @@ export class Sim {
     const bandTop = this.h * LAYOUT.bandTop;
     const bandBot = this.h * LAYOUT.bandBot;
     resetUnit(u, 0, 'soldier');
-    // eject onto the molder's output tray, then fan out to an assigned lane
-    u.x = LAYOUT.molderX + 40 + this.rng() * 18;
-    u.y = this.h * (LAYOUT.molderY - 0.02) + this.rng() * this.h * 0.045;
+    // eject onto the molder's output tray (right of the platens — units must
+    // never clip through the machine), then fan out to an assigned lane
+    u.x = LAYOUT.molderX + 58 + this.rng() * 16;
+    u.y = this.h * (LAYOUT.molderY - 0.018) + this.rng() * this.h * 0.04;
     u.laneY = bandTop + this.rng() * (bandBot - bandTop);
     u.px = u.x;
     u.py = u.y;
@@ -452,7 +453,7 @@ export class Sim {
    * Pairwise over ~200 units is ~20k cheap checks — fine at 60Hz.
    */
   private separate(dt: number) {
-    const MIN = 19;
+    const MIN = 21;
     const MIN2 = MIN * MIN;
     const push = 46 * dt;
     const bandTop = this.h * LAYOUT.bandTop;

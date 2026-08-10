@@ -39,38 +39,62 @@ export function bakeGround(w: number, h: number, zone: number, rng: Rng): Ground
 // ---------------------------------------------------------------- zone 0: carpet
 
 function carpet(c: CanvasRenderingContext2D, w: number, h: number, rng: Rng) {
-  // hot terracotta cut-pile — graded like miniature photography
+  // walnut-warm cut-pile — hot enough to grade as miniature photography, but
+  // dark/cool enough that pale-bone tan figures pop against it
   const g = c.createLinearGradient(0, 0, 0, h);
-  g.addColorStop(0, '#8e4f2c');
-  g.addColorStop(0.42, '#b06a3a');
-  g.addColorStop(0.62, '#b46e3e');
-  g.addColorStop(1, '#8a4c2a');
+  g.addColorStop(0, '#6e3d22');
+  g.addColorStop(0.42, '#93552f');
+  g.addColorStop(0.62, '#985a33');
+  g.addColorStop(1, '#6a3a20');
   c.fillStyle = g;
   c.fillRect(0, 0, w, h);
 
+  // loop-pile weave: horizontal wale rows make it read as CARPET, not gradient
+  c.lineCap = 'round';
+  const rowH = 7;
+  for (let y = 0; y < h + rowH; y += rowH) {
+    c.strokeStyle = 'rgba(50,22,8,0.16)';
+    c.lineWidth = 2.4;
+    c.beginPath();
+    for (let x = 0; x <= w + 8; x += 8) {
+      const yy = y + Math.sin(x * 0.09 + y * 1.7) * 1.6;
+      if (x === 0) c.moveTo(x, yy);
+      else c.lineTo(x, yy);
+    }
+    c.stroke();
+    c.strokeStyle = 'rgba(220,150,95,0.1)';
+    c.lineWidth = 1.4;
+    c.beginPath();
+    for (let x = 0; x <= w + 8; x += 8) {
+      const yy = y - 2.4 + Math.sin(x * 0.09 + y * 1.7) * 1.6;
+      if (x === 0) c.moveTo(x, yy);
+      else c.lineTo(x, yy);
+    }
+    c.stroke();
+  }
+
   // dense pile speckle
-  const darks = ['#6f3a1e', '#7d4224', '#5e3018'];
-  const lights = ['#c98650', '#d69660', '#e2a76e'];
+  const darks = ['#5a2d14', '#66351a', '#4c2510'];
+  const lights = ['#b57746', '#c28653', '#cf9660'];
   const n = Math.floor((w * h) / 95);
   for (let i = 0; i < n; i++) {
     const x = rng() * w;
     const y = rng() * h;
     const r = 0.7 + rng() * 1.8;
     c.fillStyle = (rng() < 0.52 ? darks : lights)[(rng() * 3) | 0];
-    c.globalAlpha = 0.22 + rng() * 0.3;
+    c.globalAlpha = 0.2 + rng() * 0.28;
     c.beginPath();
     c.arc(x, y, r, 0, Math.PI * 2);
     c.fill();
   }
-  // fiber strokes
-  c.globalAlpha = 0.15;
-  c.lineCap = 'round';
+  // fiber tufts
+  c.globalAlpha = 0.14;
   for (let i = 0; i < n / 6; i++) {
     const x = rng() * w;
     const y = rng() * h;
     const a = rng() * Math.PI;
     const len = 3 + rng() * 6;
-    c.strokeStyle = rng() < 0.5 ? '#5e3018' : '#e2a76e';
+    c.strokeStyle = rng() < 0.5 ? '#4c2510' : '#cf9660';
     c.lineWidth = 0.8 + rng() * 0.9;
     c.beginPath();
     c.moveTo(x, y);
@@ -92,7 +116,7 @@ function carpet(c: CanvasRenderingContext2D, w: number, h: number, rng: Rng) {
   pencil(c, w * 0.02, h * 0.135, w * 0.9);
   legoBrick(c, w * 0.66, h * 0.225, w * 0.24, '#c33a31', '#8f1f18', '#e05a50');
   legoBrick(c, w * 0.84, h * 0.185, w * 0.19, '#2a63b8', '#1a4187', '#4a86d8');
-  coins(c, w * 0.78, h * 0.7, w, rng);
+  coins(c, w * 0.76, h * 0.775, w, rng);
 
   // vignette: 12% corner darkening + top/bottom press
   const v = c.createLinearGradient(0, 0, 0, h);

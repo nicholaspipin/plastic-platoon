@@ -43,11 +43,11 @@ export class Hud {
     this.scrapEl.innerHTML = `<span class="scrap-ico"></span><span class="scrap-num">0</span>`;
     this.muteBtn = document.createElement('button');
     this.muteBtn.className = 'icon-btn';
-    this.muteBtn.textContent = this.muted ? '🔇' : '🔊';
+    this.muteBtn.innerHTML = speakerSvg(this.muted);
     this.muteBtn.addEventListener('pointerdown', (e) => {
       e.stopPropagation();
       this.muted = !this.muted;
-      this.muteBtn.textContent = this.muted ? '🔇' : '🔊';
+      this.muteBtn.innerHTML = speakerSvg(this.muted);
       this.cb.onMute(this.muted);
     });
     right.append(this.scrapEl, this.muteBtn);
@@ -58,7 +58,7 @@ export class Hud {
 
     const bottom = div('hud-bottom');
     this.bandEl = div('band-pill');
-    this.bandEl.innerHTML = `<div class="band-fill"></div><span class="band-label">TAP TO SNAP</span>`;
+    this.bandEl.innerHTML = `<div class="band-fill"></div><span class="band-ico">${bandSvg()}</span><span class="band-label">TAP TO SNAP!</span>`;
     this.bandFillEl = this.bandEl.querySelector('.band-fill') as HTMLElement;
 
     const shelf = div('shelf');
@@ -168,6 +168,22 @@ function div(cls: string): HTMLElement {
   const d = document.createElement('div');
   d.className = cls;
   return d;
+}
+
+function speakerSvg(muted: boolean): string {
+  const slash = muted
+    ? `<line x1="3" y1="21" x2="21" y2="3" stroke="#c8452c" stroke-width="3.4" stroke-linecap="round"/>`
+    : `<path d="M15.5 8.5 Q18.5 12 15.5 15.5 M17.5 5.5 Q22 12 17.5 18.5" fill="none" stroke="#2b2418" stroke-width="2.2" stroke-linecap="round"/>`;
+  return `<svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">
+    <path d="M4 9.5 L8 9.5 L12.5 5.5 L12.5 18.5 L8 14.5 L4 14.5 Z" fill="#2b2418" stroke="#2b2418" stroke-width="1.4" stroke-linejoin="round"/>
+    ${slash}
+  </svg>`;
+}
+
+function bandSvg(): string {
+  return `<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+    <ellipse cx="12" cy="12" rx="9" ry="6.4" fill="none" stroke="#c8452c" stroke-width="3" transform="rotate(-18 12 12)"/>
+  </svg>`;
 }
 
 function fmt(n: number): string {

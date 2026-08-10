@@ -61,13 +61,13 @@ await shot('3-mid-battle', async () => {
     pp.ff(28);
     let guard = 0;
     while (
-      (pp.sim.countActive(1) < 6 ||
-        pp.sim.units.some((u) => u.active && u.faction === 1 && u.x > pp.sim.w * 0.95)) &&
+      (pp.sim.countActive(1) < 8 ||
+        pp.sim.units.some((u) => u.active && u.faction === 1 && u.x > pp.sim.w * 0.92)) &&
       guard++ < 240
     ) {
       pp.ff(0.25);
     }
-    pp.ff(0.8); // let the exchange of fire start, but not finish
+    pp.ff(0.3); // the exchange of fire is starting — freeze it here
   });
   await page.waitForTimeout(1600);
 });

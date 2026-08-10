@@ -22,6 +22,16 @@ interface Flash {
   t: number;
 }
 
+interface Shard {
+  spr: Sprite;
+  vx: number;
+  vy: number;
+  vr: number;
+  t: number;
+  life: number;
+  floorY: number;
+}
+
 /**
  * Interpolated renderer over the fixed-step sim. All world drawing is sprite
  * blits from the baked atlas; the tilt-shift pass is two pre-blurred strips.
@@ -45,9 +55,12 @@ export class Renderer {
   private tracers: Tracer[] = [];
   private rings: RingFx[] = [];
   private flashes: Flash[] = [];
+  private shards: Shard[] = [];
   private molderBase!: Sprite;
   private piston!: Sprite;
   private pellets!: Sprite;
+  private studs: Sprite[] = [];
+  private celebration!: Sprite; // additive flash over the molder on upgrade
   private stampAnim = 0;
   private groundSprite: Sprite | null = null;
   private tiltTop: Sprite | null = null;
@@ -57,6 +70,9 @@ export class Renderer {
 
   // screen shake (trauma model — random offsets, decay 1.5/s)
   trauma = 0;
+  // directional camera kick (springs back critically damped)
+  private kickX = 0;
+  private kickY = 0;
 
   reducedMotion = false;
 
@@ -131,6 +147,13 @@ export class Renderer {
       this.fxLayer.addChild(r);
       this.rings.push({ spr: r, t: 1 });
     }
+    for (let i = 0; i < 110; i++) {
+      const s = new Sprite(this.atlas.tex.shard);
+      s.anchor.set(0.5);
+      s.visible = false;
+      this.fxLayer.addChild(s);
+      this.shards.push({ spr: s, vx: 0, vy: 0, vr: 0, t: 0, life: 1, floorY: 0 });
+    }
 
     // molder — hero of the left side
     this.molderBase = new Sprite(this.atlas.tex.molder);
@@ -139,9 +162,22 @@ export class Renderer {
     this.piston.anchor.set(0.5, 0);
     this.pellets = new Sprite(this.atlas.tex.pellets);
     this.pellets.anchor.set(0.5, 0.5);
-    this.unitLayer.addChild(this.molderBase, this.piston, this.pellets);
+    this.celebration = new Sprite(this.atlas.tex.spark);
+    this.celebration.anchor.set(0.5);
+    this.celebration.blendMode = 'add';
+    this.celebration.visible = false;
+    this.unitLayer.addChild(this.molderBase, this.piston, this.pellets, this.celebration);
+    // gold studs on the plinth mark purchased upgrade levels
+    for (let i = 0; i < 8; i++) {
+      const s = new Sprite(this.atlas.tex.stud);
+      s.anchor.set(0.5);
+      s.visible = false;
+      this.unitLayer.addChild(s);
+      this.studs.push(s);
+    }
 
     this.layout(sim);
+    this.refreshStuds(sim);
   }
 
   get w() {
@@ -162,11 +198,28 @@ export class Renderer {
     }
     const my = this.h * LAYOUT.molderY;
     this.molderBase.position.set(LAYOUT.molderX, my);
-    this.molderBase.zIndex = my - 6;
+    // zIndex sits above units at the machine's visual midline, but below units
+    // standing on the output tray — so nothing ever clips through the platens
+    this.molderBase.zIndex = my - 42;
     this.piston.position.set(LAYOUT.molderX + 14, this.molderTop + 30);
-    this.piston.zIndex = my - 5;
+    this.piston.zIndex = my - 41;
     this.pellets.position.set(LAYOUT.molderX + 10, this.molderTop + 4);
-    this.pellets.zIndex = my - 4;
+    this.pellets.zIndex = my - 40;
+    this.celebration.position.set(LAYOUT.molderX, my - 90);
+    this.celebration.zIndex = my - 39;
+    for (let i = 0; i < this.studs.length; i++) {
+      this.studs[i].position.set(LAYOUT.molderX - 52 + i * 14.5, my - 22);
+      this.studs[i].zIndex = my - 39;
+    }
+  }
+
+  refreshStuds(sim: Sim) {
+    const total =
+      sim.state.upgrades.faster +
+      sim.state.upgrades.bigger +
+      sim.state.upgrades.rifles +
+      sim.state.upgrades.scouts;
+    for (let i = 0; i < this.studs.length; i++) this.studs[i].visible = i < total;
   }
 
   rebakeGround(zone: number) {
@@ -219,15 +272,90 @@ export class Renderer {
         this.spawnFlash(mx, my);
         break;
       }
-      case 'band':
+      case 'band': {
         this.spawnRing(e.x, e.y);
         this.addTrauma(0.42);
+        // directional kick away from the snap point, springs back
+        if (!this.reducedMotion) {
+          const cx = this.w / 2;
+          const cy = this.h / 2;
+          const dx = cx - e.x;
+          const dy = cy - e.y;
+          const len = Math.hypot(dx, dy) || 1;
+          this.kickX = (dx / len) * 5;
+          this.kickY = (dy / len) * 5;
+        }
         break;
-      case 'kill':
+      }
+      case 'waveStart': {
+        // horizon dust: tan puffs kicked up as the wave crests into view
+        for (let i = 0; i < 7; i++) {
+          for (const f of this.flashes) {
+            if (f.spr.visible) continue;
+            f.spr.visible = true;
+            f.spr.tint = 0xc9a06a;
+            f.spr.position.set(
+              this.w - 8 - Math.random() * 30,
+              this.h * (LAYOUT.bandTop + Math.random() * (LAYOUT.bandBot - LAYOUT.bandTop))
+            );
+            f.spr.rotation = Math.random() * Math.PI;
+            f.spr.scale.set(1.6 + Math.random() * 1.8);
+            f.spr.alpha = 0.55;
+            f.t = -0.65 - Math.random() * 0.3; // negative t = slow dust fade mode
+            break;
+          }
+        }
+        break;
+      }
+      case 'kill': {
+        const tint =
+          e.kind === 'robot'
+            ? 0x9aa1ac
+            : e.kind === 'dino'
+              ? 0xc97c42
+              : e.faction === 0
+                ? 0x82955c
+                : 0xecd7a8;
+        const count = e.kind === 'soldier' ? 7 + ((Math.random() * 5) | 0) : 26;
+        this.spawnShards(e.x, e.y - 16, count, tint, e.kind === 'soldier' ? 1 : 1.6);
         if (e.kind !== 'soldier') this.addTrauma(0.5);
         break;
+      }
+      case 'buy': {
+        // the machine celebrates: flash + gold/green confetti + a new stud
+        this.celebration.visible = true;
+        this.celebration.alpha = 0.95;
+        this.celebration.scale.set(9);
+        this.spawnShards(LAYOUT.molderX + 6, this.h * LAYOUT.molderY - 110, 9, 0xd9a62e, 1.2);
+        this.spawnShards(LAYOUT.molderX + 6, this.h * LAYOUT.molderY - 100, 8, 0x82955c, 1.1);
+        this.refreshStuds(sim);
+        this.addTrauma(0.2);
+        break;
+      }
       default:
         break;
+    }
+  }
+
+  private spawnShards(x: number, y: number, count: number, tint: number, sizeMul: number) {
+    let spawned = 0;
+    for (const s of this.shards) {
+      if (s.spr.visible) continue;
+      s.spr.visible = true;
+      s.spr.position.set(x, y);
+      s.spr.tint = tint;
+      s.spr.rotation = Math.random() * Math.PI * 2;
+      s.spr.alpha = 1;
+      s.spr.scale.set((0.7 + Math.random() * 0.7) * sizeMul);
+      const a = Math.random() * Math.PI * 2;
+      const sp = 60 + Math.random() * 150;
+      s.vx = Math.cos(a) * sp;
+      s.vy = Math.sin(a) * sp * 0.6 - 110 - Math.random() * 80;
+      s.vr = (Math.random() - 0.5) * 18;
+      s.t = 0;
+      s.life = 0.55 + Math.random() * 0.35;
+      s.floorY = y + 14 + Math.random() * 18;
+      if (++spawned >= count) return;
     }
   }
 
@@ -284,7 +412,13 @@ export class Renderer {
     // trauma shake: random offsets each frame, shake = trauma², decay 1.5/s
     this.trauma = Math.max(0, this.trauma - dt * 1.5);
     const mag = this.trauma * this.trauma * 14;
-    this.world.position.set((Math.random() * 2 - 1) * mag, (Math.random() * 2 - 1) * mag * 0.7);
+    // directional kick springs back critically damped (~150ms)
+    this.kickX -= this.kickX * Math.min(1, dt * 13);
+    this.kickY -= this.kickY * Math.min(1, dt * 13);
+    this.world.position.set(
+      (Math.random() * 2 - 1) * mag + this.kickX,
+      (Math.random() * 2 - 1) * mag * 0.7 + this.kickY
+    );
 
     // ---- molder: slam anim + idle breathing (nothing is ever fully static)
     if (this.stampAnim > 0) this.stampAnim = Math.max(0, this.stampAnim - dt * 4.2);
@@ -404,9 +538,20 @@ export class Renderer {
       if (tr.t >= tr.life) tr.spr.visible = false;
     }
 
-    // muzzle flashes: 1–2 frame life
+    // muzzle flashes (1–2 frame life) — negative t marks slow dust puffs
     for (const f of this.flashes) {
       if (!f.spr.visible) continue;
+      if (f.t < 0) {
+        f.t += dt;
+        f.spr.x -= dt * 26;
+        f.spr.y -= dt * 8;
+        f.spr.alpha = Math.min(0.55, -f.t * 1.4);
+        if (f.t >= 0) {
+          f.spr.visible = false;
+          f.spr.tint = 0xffffff;
+        }
+        continue;
+      }
       f.t += dt;
       f.spr.alpha = Math.max(0, 1 - f.t / 0.05);
       if (f.t >= 0.05) f.spr.visible = false;
@@ -419,6 +564,32 @@ export class Renderer {
       r.spr.scale.set(0.3 + r.t * 1.6);
       r.spr.alpha = Math.max(0, 0.9 * (1 - r.t));
       if (r.t >= 1) r.spr.visible = false;
+    }
+
+    // plastic shards: gravity, spin, bounce once on the floor, fade
+    for (const s of this.shards) {
+      if (!s.spr.visible) continue;
+      s.t += dt;
+      s.vy += 620 * dt;
+      s.spr.x += s.vx * dt;
+      s.spr.y += s.vy * dt;
+      s.spr.rotation += s.vr * dt;
+      if (s.spr.y > s.floorY && s.vy > 0) {
+        s.spr.y = s.floorY;
+        s.vy *= -0.35;
+        s.vx *= 0.6;
+        s.vr *= 0.5;
+      }
+      const k = s.t / s.life;
+      if (k > 0.65) s.spr.alpha = Math.max(0, 1 - (k - 0.65) / 0.35);
+      if (k >= 1) s.spr.visible = false;
+    }
+
+    // upgrade celebration flash decays fast
+    if (this.celebration.visible) {
+      this.celebration.alpha -= dt * 3.4;
+      this.celebration.scale.set(this.celebration.scale.x + dt * 26);
+      if (this.celebration.alpha <= 0) this.celebration.visible = false;
     }
   }
 }

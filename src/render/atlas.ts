@@ -31,12 +31,13 @@ export const GREEN_P: Plastic = {
   sheen: '#b7c68f',
   spec: '#f4f8e8',
 };
+// tan pushed toward pale bone so it never camouflages into the warm floor
 export const TAN_P: Plastic = {
-  crev: '#8a6f42',
-  base: '#c4a46a',
-  light: '#dec28e',
-  sheen: '#f0ddb4',
-  spec: '#fffbef',
+  crev: '#8f7040',
+  base: '#d4b47e',
+  light: '#ecd7a8',
+  sheen: '#f8ecca',
+  spec: '#fffdf4',
 };
 export const ROBOT_P: Plastic = {
   crev: '#4a4e55',
@@ -73,7 +74,8 @@ export function bakeAtlas(): Atlas {
   cells.push({ name: 'dino', w: 88, h: 74, draw: (c) => dino(c, DINO_P) });
   cells.push({ name: 'shadow', w: 48, h: 20, draw: shadow });
   cells.push({ name: 'pip', w: 16, h: 16, draw: pip });
-  cells.push({ name: 'tracer', w: 28, h: 6, draw: tracer });
+  cells.push({ name: 'tracer', w: 30, h: 10, draw: tracer });
+  cells.push({ name: 'stud', w: 12, h: 12, draw: stud });
   cells.push({ name: 'muzzle', w: 22, h: 22, draw: muzzle });
   cells.push({ name: 'molder', w: 150, h: 180, draw: molderBody });
   cells.push({ name: 'piston', w: 76, h: 74, draw: molderPiston });
@@ -680,12 +682,33 @@ function pip(c: CanvasRenderingContext2D) {
 }
 
 function tracer(c: CanvasRenderingContext2D) {
-  const g = c.createLinearGradient(0, 0, 28, 0);
+  // fat yellow-white streak with a soft glow halo (bake-time gradient)
+  const halo = c.createLinearGradient(0, 0, 30, 0);
+  halo.addColorStop(0, 'rgba(255,220,120,0)');
+  halo.addColorStop(0.7, 'rgba(255,220,120,0.4)');
+  halo.addColorStop(1, 'rgba(255,230,150,0.55)');
+  c.fillStyle = halo;
+  rr(c, 0, 0.5, 30, 9, 4.5);
+  c.fill();
+  const g = c.createLinearGradient(0, 0, 30, 0);
   g.addColorStop(0, 'rgba(255,244,200,0)');
-  g.addColorStop(0.7, 'rgba(255,244,200,0.9)');
-  g.addColorStop(1, 'rgba(255,255,240,1)');
+  g.addColorStop(0.6, 'rgba(255,246,205,0.95)');
+  g.addColorStop(1, 'rgba(255,255,244,1)');
   c.fillStyle = g;
-  rr(c, 0, 1.2, 28, 3.6, 1.8);
+  rr(c, 1, 2.8, 29, 4.4, 2.2);
+  c.fill();
+}
+
+/** Gold upgrade stud — one appears on the Molder plinth per upgrade level. */
+function stud(c: CanvasRenderingContext2D) {
+  c.fillStyle = '#9a7014';
+  ell(c, 6, 6.6, 4.6, 4.2);
+  c.fill();
+  c.fillStyle = '#d9a62e';
+  ell(c, 6, 5.8, 4.4, 4);
+  c.fill();
+  c.fillStyle = '#f6e3ae';
+  ell(c, 4.6, 4.4, 1.8, 1.2, -0.5);
   c.fill();
 }
 

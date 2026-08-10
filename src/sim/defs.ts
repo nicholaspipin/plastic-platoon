@@ -16,7 +16,7 @@ export const TAN = {
   range: 95,
   cd: 1.5,
   hpBase: 2,
-  hpWaveScale: 0.18,
+  hpWaveScale: 0.3, // steeper than the 0.18 baseline: waves melted in <1s as the green army snowballed, so firefights were never visible
   dmg: 0.55,
   scrap: 2,
 };
@@ -26,7 +26,7 @@ export const ROBOT = {
   range: 110,
   cd: 2.0,
   hpBase: 55,
-  hpWaveScale: 0.18,
+  hpWaveScale: 0.24,
   dmg: 3,
   scrap: 22,
   everyNWaves: 5,
