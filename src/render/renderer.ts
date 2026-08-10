@@ -3,6 +3,7 @@ import { LAYOUT } from '../sim/defs';
 import type { Sim, SimEvent } from '../sim/sim';
 import { bakeAtlas, type Atlas } from './atlas';
 import { bakeGround } from './ground';
+import { bakeTiltShift } from './tiltshift';
 import { mulberry32 } from '../sim/rng';
 
 interface Tracer {
@@ -16,9 +17,15 @@ interface RingFx {
   t: number;
 }
 
+interface Flash {
+  spr: Sprite;
+  t: number;
+}
+
 /**
  * Interpolated renderer over the fixed-step sim. All world drawing is sprite
- * blits from the baked atlas. Owns camera shake offset + molder animation.
+ * blits from the baked atlas; the tilt-shift pass is two pre-blurred strips.
+ * Owns camera shake + molder animation + per-unit cosmetic state (lean, hop).
  */
 export class Renderer {
   app!: Application;
@@ -28,21 +35,28 @@ export class Renderer {
   shadowLayer = new Container();
   unitLayer = new Container();
   fxLayer = new Container();
+  overlayLayer = new Container(); // tilt-shift strips, above the action
 
   private unitShadows: Sprite[] = [];
   private unitBodies: Sprite[] = [];
+  private spawnT: Float32Array = new Float32Array(0); // per-unit hop anim
+  private lean: Float32Array = new Float32Array(0); // per-unit static toy lean
   private pipSprites: Sprite[] = [];
   private tracers: Tracer[] = [];
   private rings: RingFx[] = [];
+  private flashes: Flash[] = [];
   private molderBase!: Sprite;
   private piston!: Sprite;
+  private pellets!: Sprite;
   private stampAnim = 0;
   private groundSprite: Sprite | null = null;
+  private tiltTop: Sprite | null = null;
+  private tiltBottom: Sprite | null = null;
   private groundZone = -1;
+  private idleT = 0;
 
-  // screen shake (trauma model; full juice pass in M2)
+  // screen shake (trauma model — random offsets, decay 1.5/s)
   trauma = 0;
-  private shakeT = 0;
 
   reducedMotion = false;
 
@@ -61,11 +75,19 @@ export class Renderer {
 
     this.atlas = bakeAtlas();
 
-    this.world.addChild(this.groundLayer, this.shadowLayer, this.unitLayer, this.fxLayer);
+    this.world.addChild(
+      this.groundLayer,
+      this.shadowLayer,
+      this.unitLayer,
+      this.fxLayer,
+      this.overlayLayer
+    );
     this.app.stage.addChild(this.world);
     this.unitLayer.sortableChildren = true;
 
     // unit sprite pools, parallel to sim.units
+    this.spawnT = new Float32Array(sim.units.length).fill(9);
+    this.lean = new Float32Array(sim.units.length);
     for (let i = 0; i < sim.units.length; i++) {
       const sh = new Sprite(this.atlas.tex.shadow);
       sh.anchor.set(0.5, 0.5);
@@ -74,7 +96,7 @@ export class Renderer {
       this.unitShadows.push(sh);
 
       const b = new Sprite(this.atlas.tex.green_march0);
-      b.anchor.set(0.5, 0.92); // pivot at the base so tipping looks right
+      b.anchor.set(0.5, 0.9); // pivot at the base so tipping looks right
       b.visible = false;
       this.unitLayer.addChild(b);
       this.unitBodies.push(b);
@@ -95,6 +117,13 @@ export class Renderer {
       this.fxLayer.addChild(t);
       this.tracers.push({ spr: t, t: 0, life: 0.09 });
     }
+    for (let i = 0; i < 24; i++) {
+      const m = new Sprite(this.atlas.tex.muzzle);
+      m.anchor.set(0.5);
+      m.visible = false;
+      this.fxLayer.addChild(m);
+      this.flashes.push({ spr: m, t: 0 });
+    }
     for (let i = 0; i < 6; i++) {
       const r = new Sprite(this.atlas.tex.ring);
       r.anchor.set(0.5);
@@ -103,13 +132,14 @@ export class Renderer {
       this.rings.push({ spr: r, t: 1 });
     }
 
-    // molder
+    // molder — hero of the left side
     this.molderBase = new Sprite(this.atlas.tex.molder);
     this.molderBase.anchor.set(0.5, 1);
     this.piston = new Sprite(this.atlas.tex.piston);
     this.piston.anchor.set(0.5, 0);
-    this.unitLayer.addChild(this.molderBase);
-    this.unitLayer.addChild(this.piston);
+    this.pellets = new Sprite(this.atlas.tex.pellets);
+    this.pellets.anchor.set(0.5, 0.5);
+    this.unitLayer.addChild(this.molderBase, this.piston, this.pellets);
 
     this.layout(sim);
   }
@@ -121,19 +151,22 @@ export class Renderer {
     return this.app.renderer.screen.height;
   }
 
+  private get molderTop() {
+    return this.h * LAYOUT.molderY - 180;
+  }
+
   layout(sim: Sim) {
     sim.resize(this.w, this.h);
-    if (this.groundZone !== sim.state.zone || !this.groundSprite) {
+    if (this.groundZone !== sim.state.zone) {
       this.rebakeGround(sim.state.zone);
-    } else if (this.groundSprite) {
-      this.groundSprite.width = this.w;
-      this.groundSprite.height = this.h;
     }
-    const my = this.h * 0.5;
-    this.molderBase.position.set(LAYOUT.molderX, my + 75);
-    this.molderBase.zIndex = my + 74;
-    this.piston.position.set(LAYOUT.molderX + 14, my - 60);
-    this.piston.zIndex = my + 76;
+    const my = this.h * LAYOUT.molderY;
+    this.molderBase.position.set(LAYOUT.molderX, my);
+    this.molderBase.zIndex = my - 6;
+    this.piston.position.set(LAYOUT.molderX + 14, this.molderTop + 30);
+    this.piston.zIndex = my - 5;
+    this.pellets.position.set(LAYOUT.molderX + 10, this.molderTop + 4);
+    this.pellets.zIndex = my - 4;
   }
 
   rebakeGround(zone: number) {
@@ -142,20 +175,48 @@ export class Renderer {
       this.groundSprite.destroy({ texture: true });
       this.groundSprite = null;
     }
-    const tex = bakeGround(this.w, this.h, zone, mulberry32(1234 + zone));
-    this.groundSprite = new Sprite(tex);
+    if (this.tiltTop) {
+      this.tiltTop.destroy({ texture: true });
+      this.tiltBottom?.destroy({ texture: true });
+      this.tiltTop = this.tiltBottom = null;
+    }
+    const bake = bakeGround(this.w, this.h, zone, mulberry32(1234 + zone));
+    this.groundSprite = new Sprite(bake.texture);
+    // explicit sizing: Texture.from(canvas) fixes its frame at creation, so a
+    // later source.resolution change does not shrink it — set logical size here
+    this.groundSprite.width = this.w;
+    this.groundSprite.height = this.h;
     this.groundLayer.addChild(this.groundSprite);
+
+    const ts = bakeTiltShift(bake.canvas, this.h, bake.scale);
+    this.tiltTop = ts.top;
+    this.tiltBottom = ts.bottom;
+    this.tiltTop.width = this.w;
+    this.tiltTop.height = Math.round(this.h * 0.39);
+    this.tiltBottom.width = this.w;
+    this.tiltBottom.height = this.h - Math.round(this.h * 0.71);
+    this.overlayLayer.addChild(ts.top, ts.bottom);
   }
 
   handleEvent(e: SimEvent, sim: Sim) {
     switch (e.type) {
       case 'stamp':
         this.stampAnim = 1;
-        this.addTrauma(0.18);
+        this.addTrauma(0.16);
+        break;
+      case 'spawn':
+        this.spawnT[e.i] = 0;
+        this.lean[e.i] = (sim.units[e.i].phase / Math.PI - 1) * 0.06; // ±3.5° toy lean
         break;
       case 'fire': {
         const u = sim.units[e.i];
-        this.spawnTracer(u.x, u.y - 24, e.tx, e.ty - 24);
+        const dx = e.tx - u.x;
+        const dy = e.ty - u.y;
+        const len = Math.hypot(dx, dy) || 1;
+        const mx = u.x + (dx / len) * 17;
+        const my = u.y - 24 + (dy / len) * 8;
+        this.spawnTracer(mx, my, e.tx, e.ty - 22);
+        this.spawnFlash(mx, my);
         break;
       }
       case 'band':
@@ -191,6 +252,19 @@ export class Renderer {
     }
   }
 
+  private spawnFlash(x: number, y: number) {
+    for (const f of this.flashes) {
+      if (f.spr.visible) continue;
+      f.spr.visible = true;
+      f.spr.position.set(x, y);
+      f.spr.rotation = Math.random() * Math.PI * 2;
+      f.spr.scale.set(0.8 + Math.random() * 0.5);
+      f.spr.alpha = 1;
+      f.t = 0;
+      return;
+    }
+  }
+
   private spawnRing(x: number, y: number) {
     for (const r of this.rings) {
       if (r.spr.visible) continue;
@@ -205,21 +279,31 @@ export class Renderer {
 
   /** dt = real frame seconds (unaffected by hit-stop); alpha = sim interpolation. */
   render(sim: Sim, alpha: number, dt: number) {
-    // camera shake: trauma^2 falloff
-    this.trauma = Math.max(0, this.trauma - dt * 1.5);
-    this.shakeT += dt * 34;
-    const mag = this.trauma * this.trauma * 6;
-    this.world.position.set(
-      Math.sin(this.shakeT * 1.9) * mag,
-      Math.cos(this.shakeT * 2.7) * mag * 0.7
-    );
+    this.idleT += dt;
 
-    // molder piston
-    if (this.stampAnim > 0) this.stampAnim = Math.max(0, this.stampAnim - dt * 5);
+    // trauma shake: random offsets each frame, shake = trauma², decay 1.5/s
+    this.trauma = Math.max(0, this.trauma - dt * 1.5);
+    const mag = this.trauma * this.trauma * 14;
+    this.world.position.set((Math.random() * 2 - 1) * mag, (Math.random() * 2 - 1) * mag * 0.7);
+
+    // ---- molder: slam anim + idle breathing (nothing is ever fully static)
+    if (this.stampAnim > 0) this.stampAnim = Math.max(0, this.stampAnim - dt * 4.2);
     const a = this.stampAnim;
-    // fast slam down (a: 1 -> 0.7), spring back up
-    const down = a > 0.7 ? (1 - a) / 0.3 : Math.pow(a / 0.7, 0.6);
-    this.piston.y = this.h * 0.5 - 60 + down * 36;
+    // slam: instant down at trigger, spring back with overshoot
+    let slam: number;
+    if (a > 0.82) slam = (1 - a) / 0.18;
+    else {
+      const k = a / 0.82;
+      slam = k * k * (1 + Math.sin(k * 9) * 0.12 * k);
+    }
+    const breathe = Math.sin(this.idleT * 1.9) * 2.2;
+    this.piston.y = this.molderTop + 30 + slam * 34 + (1 - slam) * breathe;
+    // body squash on impact
+    const squash = a > 0.7 ? (a - 0.7) / 0.3 : 0;
+    this.molderBase.scale.set(1 + squash * 0.05, 1 - squash * 0.06);
+    // pellet shimmer
+    this.pellets.alpha = 0.5 + Math.sin(this.idleT * 2.7) * 0.3;
+    this.pellets.y = this.molderTop + 4 + Math.sin(this.idleT * 1.9 + 1) * 1.2;
 
     const t = sim.time + alpha * (1 / 60);
 
@@ -255,9 +339,24 @@ export class Renderer {
       }
       if (body.texture !== tex) body.texture = tex;
 
-      let rot = 0;
+      let rot = this.lean[i];
       let bob = 0;
       let alphaV = 1;
+      let sx = 1;
+      let sy = 1;
+
+      // spawn hop: pop out of the mold with a landing squash
+      if (this.spawnT[i] < 0.42) {
+        this.spawnT[i] += dt;
+        const k = Math.min(1, this.spawnT[i] / 0.42);
+        bob -= Math.sin(k * Math.PI) * 10;
+        if (k > 0.8) {
+          const s = (k - 0.8) / 0.2;
+          sx = 1 + Math.sin(s * Math.PI) * 0.18;
+          sy = 1 - Math.sin(s * Math.PI) * 0.14;
+        }
+      }
+
       if (u.state === 'dying') {
         const k = Math.min(1, u.deathT / 0.32);
         const e = 1 - (1 - k) * (1 - k); // ease-out tip
@@ -266,18 +365,22 @@ export class Renderer {
       } else if (u.state === 'march') {
         // stiff plastic waddle, stepped like stop-motion
         const step = Math.floor(t * 6 + u.phase * 2) % 2;
-        rot = (step === 0 ? 1 : -1) * 0.055;
-        bob = step === 0 ? 0 : -1.5;
+        rot += (step === 0 ? 1 : -1) * 0.05;
+        bob += step === 0 ? 0 : -1.5;
+      } else {
+        // firing: rigid, but breathe slightly
+        sy *= 1 + Math.sin(this.idleT * 6.3 + u.phase) * 0.012;
       }
 
+      const big = u.kind !== 'soldier' ? 1.55 : 1;
       body.position.set(x, y + bob);
       body.rotation = rot;
       body.alpha = alphaV;
+      body.scale.set(sx, sy);
       body.zIndex = y;
       sh.position.set(x, y - 1);
       sh.alpha = alphaV * 0.9;
-      const big = u.kind !== 'soldier' ? 1.5 : 1;
-      sh.scale.set(big, big);
+      sh.scale.set(big + (bob < 0 ? bob * 0.012 : 0), big + (bob < 0 ? bob * 0.012 : 0));
     }
 
     // pips
@@ -299,6 +402,14 @@ export class Renderer {
       tr.t += dt;
       tr.spr.alpha = Math.max(0, 0.9 * (1 - tr.t / tr.life));
       if (tr.t >= tr.life) tr.spr.visible = false;
+    }
+
+    // muzzle flashes: 1–2 frame life
+    for (const f of this.flashes) {
+      if (!f.spr.visible) continue;
+      f.t += dt;
+      f.spr.alpha = Math.max(0, 1 - f.t / 0.05);
+      if (f.t >= 0.05) f.spr.visible = false;
     }
 
     // rings

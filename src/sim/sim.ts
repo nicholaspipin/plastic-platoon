@@ -42,6 +42,7 @@ export interface Unit {
   tipDir: number; // -1 | 1 which way the toy tips when knocked over
   phase: number; // anim phase offset
   variant: number; // sprite pose variant
+  laneY: number; // assigned lane — units fan out toward it after spawning
 }
 
 export interface Pip {
@@ -255,6 +256,7 @@ export class Sim {
       }
       this.stepUnit(i, u, dt);
     }
+    this.separate(dt);
 
     // pips
     for (const p of this.pips) {
@@ -297,8 +299,10 @@ export class Sim {
     const bandTop = this.h * LAYOUT.bandTop;
     const bandBot = this.h * LAYOUT.bandBot;
     resetUnit(u, 0, 'soldier');
-    u.x = LAYOUT.molderX + 26 + this.rng() * 14;
-    u.y = bandTop + this.rng() * (bandBot - bandTop);
+    // eject onto the molder's output tray, then fan out to an assigned lane
+    u.x = LAYOUT.molderX + 40 + this.rng() * 18;
+    u.y = this.h * (LAYOUT.molderY - 0.02) + this.rng() * this.h * 0.045;
+    u.laneY = bandTop + this.rng() * (bandBot - bandTop);
     u.px = u.x;
     u.py = u.y;
     u.hp = u.maxHp = GREEN.hp;
@@ -324,6 +328,7 @@ export class Sim {
     const scale = 1 + (kind === 'dino' ? DINO.hpWaveScale : kind === 'robot' ? ROBOT.hpWaveScale : TAN.hpWaveScale) * this.state.wave;
     u.x = this.w + 30 + this.rng() * 40;
     u.y = bandTop + this.rng() * (bandBot - bandTop);
+    u.laneY = u.y;
     u.px = u.x;
     u.py = u.y;
     u.hp = u.maxHp = hpBase * scale * this.waveHpMult;
@@ -414,15 +419,24 @@ export class Sim {
       const dir = u.faction === 0 ? 1 : -1;
       let vx = dir * u.speed;
       let vy = Math.sin(this.time * 1.7 + u.phase) * 6; // gentle organic drift
+      // fan out toward the assigned lane (fresh stamps leave the tray this way)
+      const laneDy = u.laneY - u.y;
+      vy += Math.sign(laneDy) * Math.min(Math.abs(laneDy), 34) * 1.4;
+      // hold lines are staggered per-unit so formations read as ragged toy
+      // battle lines, not a single-file column
+      const spread = u.phase / (Math.PI * 2) - 0.5; // stable -0.5..0.5
       // greens hold the rally line when unopposed and never chase off-screen;
       // tans never pass the stop line (no fail state)
-      if (u.faction === 0 && !t && u.x > this.w * LAYOUT.rallyX) vx = 0;
-      if (u.faction === 0 && vx > 0 && u.x > this.w * 0.86) vx = 0;
-      if (u.faction === 1 && u.x < LAYOUT.tanStopX) vx = 0;
-      // if we have a target but out of range, close the distance (with slight y homing)
+      // deep formations (±65–70px) so the army reads as ranks, not a wall;
+      // the advance clamp keeps the exchange of fire in mid-screen frame
+      if (u.faction === 0 && !t && u.x > this.w * LAYOUT.rallyX + spread * 130) vx = 0;
+      if (u.faction === 0 && vx > 0 && u.x > this.w * 0.68 + spread * 140) vx = 0;
+      if (u.faction === 1 && u.x < LAYOUT.tanStopX + (spread + 0.5) * 90) vx = 0;
+      // range is radial, so only home toward the target's lane when badly off —
+      // constant homing funnels the whole army into one clump
       if (t) {
         const dy = t.y - u.y;
-        vy += Math.sign(dy) * Math.min(Math.abs(dy), 20) * 0.6;
+        if (Math.abs(dy) > u.range * 0.55) vy += Math.sign(dy) * 14;
       }
       u.x += vx * dt;
       u.y += vy * dt;
@@ -430,6 +444,38 @@ export class Sim {
       const bandBot = this.h * LAYOUT.bandBot;
       if (u.y < bandTop) u.y = bandTop;
       if (u.y > bandBot) u.y = bandBot;
+    }
+  }
+
+  /**
+   * Same-faction spacing so armies read as ranks of individual toys, not mush.
+   * Pairwise over ~200 units is ~20k cheap checks — fine at 60Hz.
+   */
+  private separate(dt: number) {
+    const MIN = 19;
+    const MIN2 = MIN * MIN;
+    const push = 46 * dt;
+    const bandTop = this.h * LAYOUT.bandTop;
+    const bandBot = this.h * LAYOUT.bandBot;
+    for (let i = 0; i < this.units.length; i++) {
+      const a = this.units[i];
+      if (!a.active || a.state === 'dying') continue;
+      for (let j = i + 1; j < this.units.length; j++) {
+        const b = this.units[j];
+        if (!b.active || b.state === 'dying' || b.faction !== a.faction) continue;
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 >= MIN2 || d2 < 0.01) continue;
+        const d = Math.sqrt(d2);
+        // mostly vertical spreading so rank depth (x) stays intact
+        const nx = (dx / d) * push * 0.5;
+        const ny = (dy / d) * push * 1.25;
+        a.x -= nx;
+        a.y = clamp(a.y - ny, bandTop, bandBot);
+        b.x += nx;
+        b.y = clamp(b.y + ny, bandTop, bandBot);
+      }
     }
   }
 
@@ -506,8 +552,8 @@ export class Sim {
       p.y += p.vy * dt;
     } else {
       // home to the hopper with ease-in acceleration
-      const hx = LAYOUT.molderX;
-      const hy = this.h * 0.30;
+      const hx = LAYOUT.molderX + 10;
+      const hy = this.h * LAYOUT.molderY + LAYOUT.hopperDY;
       const dx = hx - p.x;
       const dy = hy - p.y;
       const dist = Math.hypot(dx, dy);
@@ -590,6 +636,7 @@ function makeUnit(): Unit {
     tipDir: 1,
     phase: 0,
     variant: 0,
+    laneY: 0,
   };
 }
 
@@ -606,4 +653,8 @@ function resetUnit(u: Unit, faction: Faction, kind: UnitKind) {
 
 function makePip(): Pip {
   return { active: false, x: 0, y: 0, px: 0, py: 0, vx: 0, vy: 0, t: 0, value: 0 };
+}
+
+function clamp(v: number, lo: number, hi: number) {
+  return v < lo ? lo : v > hi ? hi : v;
 }

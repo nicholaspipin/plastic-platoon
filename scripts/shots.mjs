@@ -49,14 +49,25 @@ await shot('2-first-kill', async () => {
   await page.waitForTimeout(1600);
 });
 
-// 3. mid-battle (~60s simulated, upgrades bought like a real player)
+// 3. mid-battle (~60s simulated, upgrades bought like a real player;
+//    fast-forward until tans are actually on screen so the shot shows combat)
 await shot('3-mid-battle', async () => {
   await dismissIntro();
   await page.evaluate(() => {
-    window.__pp.ff(30);
-    window.__pp.buy('faster');
-    window.__pp.buy('bigger');
-    window.__pp.ff(30);
+    const pp = window.__pp;
+    pp.ff(30);
+    pp.buy('faster');
+    pp.buy('bigger');
+    pp.ff(28);
+    let guard = 0;
+    while (
+      (pp.sim.countActive(1) < 6 ||
+        pp.sim.units.some((u) => u.active && u.faction === 1 && u.x > pp.sim.w * 0.95)) &&
+      guard++ < 240
+    ) {
+      pp.ff(0.25);
+    }
+    pp.ff(0.8); // let the exchange of fire start, but not finish
   });
   await page.waitForTimeout(1600);
 });
@@ -69,7 +80,8 @@ await shot('4-upgrade', async () => {
     window.__pp.setScrap(500);
   });
   await page.waitForTimeout(300);
-  await page.tap('.buy-btn');
+  // force: the affordable-pulse animation means the button is never "stable"
+  await page.tap('.buy-btn', { force: true });
   await page.waitForTimeout(220);
 });
 

@@ -4,6 +4,10 @@ import { Rectangle, Texture, type TextureSource } from 'pixi.js';
  * Runtime-baked sprite atlas. All unit poses/variants are drawn ONCE here with
  * canvas2d (gradients allowed at bake time only) and blitted as sprites forever after.
  * Baked at 2x and served with resolution=2 so devices at DPR 2 stay crisp.
+ *
+ * Material rule (ART_NOTES §1): monochrome injection-molded plastic. Detail is
+ * value shifts within ONE hue — five values per faction, no outlines, hard-edged
+ * near-white speculars, cool rim light, oval base under every figure.
  */
 
 export interface Atlas {
@@ -12,16 +16,44 @@ export interface Atlas {
 
 const S = 2; // bake supersample
 
-interface Palette {
-  base: string;
-  dark: string;
-  spec: string;
+export interface Plastic {
+  crev: string; // crevice/shadow
+  base: string; // dominant fill
+  light: string; // up-facing planes
+  sheen: string; // waxy band on curved peaks
+  spec: string; // hard hot spot
 }
 
-export const GREEN_P: Palette = { base: '#4e7d2c', dark: '#35571c', spec: '#eaf6da' };
-export const TAN_P: Palette = { base: '#c9a266', dark: '#937044', spec: '#f8ecd4' };
-export const ROBOT_P: Palette = { base: '#8b909a', dark: '#585d66', spec: '#eff2f7' };
-export const DINO_P: Palette = { base: '#b5622e', dark: '#7c3f1b', spec: '#f8dcc4' };
+export const GREEN_P: Plastic = {
+  crev: '#3b4423',
+  base: '#5a6b3c',
+  light: '#82955c',
+  sheen: '#b7c68f',
+  spec: '#f4f8e8',
+};
+export const TAN_P: Plastic = {
+  crev: '#8a6f42',
+  base: '#c4a46a',
+  light: '#dec28e',
+  sheen: '#f0ddb4',
+  spec: '#fffbef',
+};
+export const ROBOT_P: Plastic = {
+  crev: '#4a4e55',
+  base: '#757b85',
+  light: '#9aa1ac',
+  sheen: '#c6ccd6',
+  spec: '#f4f7fc',
+};
+export const DINO_P: Plastic = {
+  crev: '#6e3714',
+  base: '#a85a28',
+  light: '#c97c42',
+  sheen: '#e8a96b',
+  spec: '#ffe8ce',
+};
+
+const RIM = 'rgba(221,231,240,0.4)'; // cool window-light rim
 
 type Cell = { name: string; w: number; h: number; draw: (c: CanvasRenderingContext2D) => void };
 
@@ -33,17 +65,19 @@ export function bakeAtlas(): Atlas {
     ['tan', TAN_P],
   ] as const) {
     const flip = fac === 'tan';
-    cells.push({ name: `${fac}_march0`, w: 48, h: 52, draw: (c) => soldier(c, pal, 'march0', flip) });
-    cells.push({ name: `${fac}_march1`, w: 48, h: 52, draw: (c) => soldier(c, pal, 'march1', flip) });
-    cells.push({ name: `${fac}_fire`, w: 48, h: 52, draw: (c) => soldier(c, pal, 'fire', flip) });
+    cells.push({ name: `${fac}_march0`, w: 48, h: 54, draw: (c) => soldier(c, pal, 'march0', flip) });
+    cells.push({ name: `${fac}_march1`, w: 48, h: 54, draw: (c) => soldier(c, pal, 'march1', flip) });
+    cells.push({ name: `${fac}_fire`, w: 48, h: 54, draw: (c) => soldier(c, pal, 'fire', flip) });
   }
-  cells.push({ name: 'robot', w: 72, h: 78, draw: (c) => robot(c, ROBOT_P) });
-  cells.push({ name: 'dino', w: 84, h: 72, draw: (c) => dino(c, DINO_P) });
+  cells.push({ name: 'robot', w: 76, h: 82, draw: (c) => robot(c, ROBOT_P) });
+  cells.push({ name: 'dino', w: 88, h: 74, draw: (c) => dino(c, DINO_P) });
   cells.push({ name: 'shadow', w: 48, h: 20, draw: shadow });
   cells.push({ name: 'pip', w: 16, h: 16, draw: pip });
   cells.push({ name: 'tracer', w: 28, h: 6, draw: tracer });
-  cells.push({ name: 'molder', w: 120, h: 150, draw: molderBody });
-  cells.push({ name: 'piston', w: 64, h: 60, draw: molderPiston });
+  cells.push({ name: 'muzzle', w: 22, h: 22, draw: muzzle });
+  cells.push({ name: 'molder', w: 150, h: 180, draw: molderBody });
+  cells.push({ name: 'piston', w: 76, h: 74, draw: molderPiston });
+  cells.push({ name: 'pellets', w: 44, h: 14, draw: pellets });
   cells.push({ name: 'ring', w: 96, h: 96, draw: ring });
   cells.push({ name: 'shard', w: 12, h: 12, draw: shard });
   cells.push({ name: 'spark', w: 10, h: 10, draw: spark });
@@ -97,258 +131,468 @@ export function bakeAtlas(): Atlas {
   return { tex };
 }
 
-// ---------------------------------------------------------------- drawing helpers
+// ---------------------------------------------------------------- helpers
 
 function rr(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   c.beginPath();
   c.roundRect(x, y, w, h, r);
 }
 
+function ell(
+  c: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  rx: number,
+  ry: number,
+  rot = 0
+) {
+  c.beginPath();
+  c.ellipse(x, y, rx, ry, rot, 0, Math.PI * 2);
+}
+
+function line(c: CanvasRenderingContext2D, x1: number, y1: number, x2: number, y2: number) {
+  c.beginPath();
+  c.moveTo(x1, y1);
+  c.lineTo(x2, y2);
+  c.stroke();
+}
+
+/** Oval base + soft-ish contact edge, the #1 "army man" signifier. */
+function ovalBase(c: CanvasRenderingContext2D, p: Plastic, cx: number, cy: number, rx: number) {
+  const ry = rx * 0.34;
+  // underside crevice (thickness of the base)
+  c.fillStyle = p.crev;
+  ell(c, cx, cy + 1.6, rx, ry);
+  c.fill();
+  // top face
+  c.fillStyle = p.base;
+  ell(c, cx, cy, rx, ry);
+  c.fill();
+  // up-facing light
+  c.fillStyle = p.light;
+  ell(c, cx - rx * 0.08, cy - 0.7, rx * 0.82, ry * 0.62);
+  c.fill();
+  // front-rim sheen line
+  c.strokeStyle = p.sheen;
+  c.lineWidth = 1.1;
+  c.beginPath();
+  c.ellipse(cx, cy, rx * 0.94, ry * 0.9, 0, Math.PI * 0.15, Math.PI * 0.85);
+  c.stroke();
+  // hard spec chip on the near rim
+  c.fillStyle = p.spec;
+  ell(c, cx - rx * 0.45, cy - ry * 0.55, 1.7, 0.8, -0.3);
+  c.fill();
+}
+
 /**
- * Classic army man, side view, facing right (flip=true mirrors for tan).
- * Cell 48x52, base ellipse center at (24, 46). 3-tone plastic: base pigment,
- * dark occlusion on the trailing/under side, hard near-white specular hits.
+ * Classic army man, side view facing right (flip mirrors for tan).
+ * Cell 48x54, base center (24, 48). Five-value monochrome, splayed theatrical pose.
+ * Tan wears a wide-brim brodie helmet so factions differ in silhouette, not just hue.
  */
-function soldier(c: CanvasRenderingContext2D, p: Palette, pose: 'march0' | 'march1' | 'fire', flip: boolean) {
+function soldier(
+  c: CanvasRenderingContext2D,
+  p: Plastic,
+  pose: 'march0' | 'march1' | 'fire',
+  flip: boolean
+) {
   c.save();
   if (flip) {
     c.translate(48, 0);
     c.scale(-1, 1);
   }
 
-  // oval base — the #1 army-man signifier
-  c.fillStyle = p.dark;
-  c.beginPath();
-  c.ellipse(24, 46, 14, 4.6, 0, 0, Math.PI * 2);
-  c.fill();
-  c.fillStyle = p.base;
-  c.beginPath();
-  c.ellipse(24, 45, 13.2, 3.9, 0, 0, Math.PI * 2);
-  c.fill();
-  // base spec sliver
-  c.fillStyle = p.spec;
-  c.globalAlpha = 0.85;
-  c.beginPath();
-  c.ellipse(19, 43.8, 4.2, 1.1, -0.25, 0, Math.PI * 2);
-  c.fill();
-  c.globalAlpha = 1;
+  ovalBase(c, p, 24, 47, 14);
 
-  c.fillStyle = p.base;
-  c.strokeStyle = p.base;
   c.lineCap = 'round';
 
-  // legs
+  // ---- legs (wide theatrical stances)
+  c.strokeStyle = p.base;
   c.lineWidth = 5;
   if (pose === 'march0') {
-    line(c, 23, 32, 17.5, 44); // back leg
-    line(c, 25, 32, 30.5, 44); // front leg
+    line(c, 22.5, 32, 15.5, 44.5); // back leg, kicked back
+    line(c, 25.5, 32, 32, 44.5); // front leg, striding
   } else if (pose === 'march1') {
-    line(c, 24, 32, 21.5, 44);
-    line(c, 24, 32, 27, 44);
+    line(c, 23.5, 32, 20.5, 45);
+    line(c, 24.5, 32, 27.5, 45);
   } else {
-    line(c, 23, 32, 19, 44);
-    line(c, 25, 32, 28.5, 44);
+    line(c, 22.5, 32, 16.5, 45); // braced firing stance
+    line(c, 25.5, 32, 30, 44.5);
   }
+  // inner-leg crevice
+  c.strokeStyle = p.crev;
+  c.lineWidth = 1.6;
+  if (pose === 'march0') line(c, 24, 33, 22, 41);
+  else if (pose === 'fire') line(c, 24, 33, 22.5, 41);
+  // front-shin light
+  c.strokeStyle = p.light;
+  c.lineWidth = 1.8;
+  if (pose === 'march0') line(c, 26.5, 34, 31, 43);
+  else if (pose === 'march1') line(c, 25.4, 34, 27.2, 43.5);
+  else line(c, 26.5, 34, 29.3, 43);
 
-  // torso
-  rr(c, 19, 19.5, 10.5, 14.5, 4);
-  c.fill();
-
-  // rifle + arms
-  c.lineWidth = 2.6;
-  c.strokeStyle = p.dark;
-  if (pose === 'fire') {
-    line(c, 20, 23.5, 41, 21.5); // rifle leveled
-  } else {
-    line(c, 21, 26, 37, 18.5); // rifle at ready, angled up
-  }
-  c.strokeStyle = p.base;
-  c.lineWidth = 4.2;
-  if (pose === 'fire') {
-    line(c, 25, 24, 33, 22.5);
-    line(c, 23, 25, 28, 23.5);
-  } else {
-    line(c, 25, 24, 31.5, 21);
-  }
-
-  // helmet
+  // ---- torso (leaning into the march / braced when firing)
+  const lean = pose === 'fire' ? -0.03 : 0.1;
+  c.save();
+  c.translate(24, 26);
+  c.rotate(lean);
   c.fillStyle = p.base;
-  c.beginPath();
-  c.arc(24.5, 14.2, 7.2, Math.PI, 0);
-  c.quadraticCurveTo(32.5, 17.4, 30.5, 18.2);
-  c.lineTo(18.5, 18.2);
-  c.quadraticCurveTo(16.5, 17.4, 17.3, 14.2);
+  rr(c, -5.5, -7.5, 11, 15, 4.5);
   c.fill();
-
-  // occlusion: dark trailing edge on torso + under helmet brim
-  c.fillStyle = p.dark;
-  c.globalAlpha = 0.55;
-  rr(c, 19, 19.5, 3.4, 14.5, 3);
+  // backpack (behind = left)
+  c.fillStyle = p.base;
+  rr(c, -9, -5.5, 4.5, 9, 2);
   c.fill();
-  c.beginPath();
-  c.rect(18.5, 16.8, 12.5, 1.6);
+  c.fillStyle = p.crev;
+  c.globalAlpha = 0.75;
+  rr(c, -9, -5.5, 1.6, 9, 1.5);
   c.fill();
   c.globalAlpha = 1;
+  // torso occlusion: trailing edge + under-arm
+  c.fillStyle = p.crev;
+  c.globalAlpha = 0.7;
+  rr(c, -5.5, -7.5, 2.6, 15, 3);
+  c.fill();
+  c.globalAlpha = 1;
+  // chest light
+  c.fillStyle = p.light;
+  rr(c, 0.6, -6.5, 4.6, 9, 3);
+  c.fill();
+  // shoulder sheen
+  c.fillStyle = p.sheen;
+  ell(c, 2.4, -5.8, 2.6, 1.3, -0.25);
+  c.fill();
+  // rim light on backpack top
+  c.strokeStyle = RIM;
+  c.lineWidth = 1;
+  line(c, -8.6, -5.2, -5.2, -6.8);
+  c.restore();
 
-  // hard specular: helmet crescent + shoulder dot (toon-shader crisp)
-  c.fillStyle = p.spec;
-  c.beginPath();
-  c.ellipse(22, 10.8, 3.4, 1.6, -0.5, 0, Math.PI * 2);
-  c.fill();
-  c.beginPath();
-  c.ellipse(26.5, 21.4, 1.8, 1.1, -0.3, 0, Math.PI * 2);
-  c.fill();
+  // ---- rifle + arms
+  const gunColor = p.crev;
+  if (pose === 'fire') {
+    // rifle leveled at the shoulder
+    c.strokeStyle = gunColor;
+    c.lineWidth = 2.8;
+    line(c, 19, 22.5, 41.5, 21);
+    // stock
+    c.lineWidth = 4.2;
+    line(c, 19.5, 23, 23.5, 22.6);
+    // foregrip hand + trigger hand
+    c.strokeStyle = p.base;
+    c.lineWidth = 4.4;
+    line(c, 26, 25.5, 32.5, 22.3);
+    line(c, 23.5, 26, 26.5, 24);
+    // barrel spec
+    c.fillStyle = p.spec;
+    ell(c, 36, 20.6, 2.1, 0.7, -0.05);
+    c.fill();
+  } else {
+    // rifle at port arms (diagonal across chest)
+    c.strokeStyle = gunColor;
+    c.lineWidth = 2.8;
+    line(c, 18.5, 28.5, 36.5, 17.5);
+    c.lineWidth = 4;
+    line(c, 18.8, 28.3, 22.3, 26.2);
+    c.strokeStyle = p.base;
+    c.lineWidth = 4.4;
+    line(c, 24, 25.5, 30.5, 21.5);
+    c.fillStyle = p.spec;
+    ell(c, 33, 19.2, 1.9, 0.7, -0.55);
+    c.fill();
+  }
+
+  // ---- head + helmet
+  if (flip) {
+    // TAN: brodie wide-brim helmet (silhouette differentiation)
+    c.fillStyle = p.base;
+    ell(c, 24.5, 15.5, 5.2, 4.4); // head ball
+    c.fill();
+    c.fillStyle = p.crev;
+    c.globalAlpha = 0.6;
+    ell(c, 24.5, 17.2, 4.6, 2.6); // face in brim shadow
+    c.fill();
+    c.globalAlpha = 1;
+    // dome
+    c.fillStyle = p.base;
+    c.beginPath();
+    c.arc(24.5, 12.8, 5.6, Math.PI, 0);
+    c.closePath();
+    c.fill();
+    // wide brim
+    c.fillStyle = p.base;
+    ell(c, 24.5, 13.2, 9.4, 2.5);
+    c.fill();
+    c.fillStyle = p.light;
+    ell(c, 23.6, 12.4, 8, 1.7);
+    c.fill();
+    // dome light + sheen + spec
+    c.fillStyle = p.light;
+    c.beginPath();
+    c.arc(23.8, 12.4, 4.4, Math.PI, 0);
+    c.closePath();
+    c.fill();
+    c.fillStyle = p.sheen;
+    ell(c, 23, 9.9, 2.8, 1.2, -0.3);
+    c.fill();
+    c.fillStyle = p.spec;
+    ell(c, 23.6, 9.1, 1.4, 0.7, -0.3);
+    c.fill();
+    // rim on brim back edge
+    c.strokeStyle = RIM;
+    c.lineWidth = 1;
+    c.beginPath();
+    c.ellipse(24.5, 13.2, 9.2, 2.3, 0, Math.PI * 1.05, Math.PI * 1.5);
+    c.stroke();
+  } else {
+    // GREEN: M1 pot helmet
+    c.fillStyle = p.base;
+    ell(c, 24.5, 16, 5, 4.2); // head ball
+    c.fill();
+    c.fillStyle = p.crev;
+    c.globalAlpha = 0.6;
+    ell(c, 24.8, 17.4, 4.2, 2.4); // face in helmet shadow
+    c.fill();
+    c.globalAlpha = 1;
+    c.fillStyle = p.base;
+    c.beginPath();
+    c.arc(24.5, 14, 7, Math.PI * 0.98, Math.PI * 0.02);
+    c.quadraticCurveTo(32, 17.6, 30, 18.4);
+    c.lineTo(19, 18.4);
+    c.quadraticCurveTo(17, 17.6, 17.55, 14);
+    c.fill();
+    // under-brim crevice
+    c.fillStyle = p.crev;
+    c.beginPath();
+    c.rect(18.6, 16.9, 12, 1.5);
+    c.fill();
+    // dome light
+    c.fillStyle = p.light;
+    c.beginPath();
+    c.arc(23.6, 13.6, 5.2, Math.PI, Math.PI * 1.98);
+    c.closePath();
+    c.fill();
+    // sheen crescent + hard spec
+    c.fillStyle = p.sheen;
+    ell(c, 22.4, 10.4, 3.1, 1.4, -0.35);
+    c.fill();
+    c.fillStyle = p.spec;
+    ell(c, 23.2, 9.4, 1.5, 0.8, -0.35);
+    c.fill();
+    // cool rim on the helmet back edge
+    c.strokeStyle = RIM;
+    c.lineWidth = 1;
+    c.beginPath();
+    c.arc(24.5, 14, 6.6, Math.PI * 1.02, Math.PI * 1.35);
+    c.stroke();
+  }
 
   c.restore();
 }
 
-/** Wind-up robot mini-boss. Cell 72x78, base center (36, 70). */
-function robot(c: CanvasRenderingContext2D, p: Palette) {
-  // base plate
-  c.fillStyle = p.dark;
-  c.beginPath();
-  c.ellipse(36, 70, 21, 6, 0, 0, Math.PI * 2);
-  c.fill();
+/** Wind-up robot mini-boss: rounded tin-toy body, gold key, red eye. Cell 76x82. */
+function robot(c: CanvasRenderingContext2D, p: Plastic) {
+  ovalBase(c, p, 38, 74, 23);
 
-  // wind-up key on the back (left side; robot faces left toward greens)
-  c.strokeStyle = '#c79a2a';
-  c.lineWidth = 3.4;
+  // wind-up key on the back (right side; robot faces left)
+  const gold = '#d9a62e';
+  const goldD = '#9a7014';
+  c.strokeStyle = goldD;
+  c.lineWidth = 3.8;
   c.beginPath();
-  c.arc(60, 34, 7, 0, Math.PI * 2);
+  c.arc(64, 36, 7.4, 0, Math.PI * 2);
   c.stroke();
+  c.strokeStyle = gold;
+  c.lineWidth = 3;
   c.beginPath();
-  c.arc(60, 34, 2.6, 0, Math.PI * 2);
-  c.fillStyle = '#c79a2a';
+  c.arc(63.5, 35.5, 7.2, 0, Math.PI * 2);
+  c.stroke();
+  c.fillStyle = gold;
+  ell(c, 63.5, 35.5, 2.6, 2.6);
   c.fill();
-  line(c, 53, 34, 48, 34);
-
-  // legs
-  c.fillStyle = p.base;
-  rr(c, 24, 52, 9, 16, 3);
-  c.fill();
-  rr(c, 39, 52, 9, 16, 3);
-  c.fill();
-  // feet
-  c.fillStyle = p.dark;
-  rr(c, 21, 64, 14, 6, 3);
-  c.fill();
-  rr(c, 37, 64, 14, 6, 3);
+  c.strokeStyle = goldD;
+  c.lineWidth = 2.6;
+  line(c, 56.5, 35.5, 51, 35.5);
+  c.fillStyle = '#f6e3ae';
+  ell(c, 61, 30.5, 1.6, 0.9, -0.6);
   c.fill();
 
-  // body
+  // legs + feet plates
   c.fillStyle = p.base;
-  rr(c, 16, 24, 40, 32, 6);
+  rr(c, 25, 56, 9.5, 14, 3.5);
   c.fill();
-  // chest panel
-  c.fillStyle = p.dark;
-  c.globalAlpha = 0.5;
-  rr(c, 22, 30, 18, 12, 3);
+  rr(c, 41, 56, 9.5, 14, 3.5);
+  c.fill();
+  c.fillStyle = p.crev;
+  rr(c, 21.5, 67, 15.5, 6, 3);
+  c.fill();
+  rr(c, 38.5, 67, 15.5, 6, 3);
+  c.fill();
+  c.fillStyle = p.light;
+  rr(c, 26.2, 57, 3.2, 11, 2);
+  c.fill();
+  rr(c, 42.2, 57, 3.2, 11, 2);
+  c.fill();
+
+  // rounded body
+  c.fillStyle = p.base;
+  rr(c, 16, 24, 43, 35, 10);
+  c.fill();
+  // trailing-edge occlusion
+  c.fillStyle = p.crev;
+  c.globalAlpha = 0.65;
+  rr(c, 52, 26, 7, 31, 6);
   c.fill();
   c.globalAlpha = 1;
+  // face-plate light
+  c.fillStyle = p.light;
+  rr(c, 18.5, 26, 14, 29, 7);
+  c.fill();
+  // chest dial
+  c.fillStyle = p.crev;
+  ell(c, 38, 41, 7.5, 7.5);
+  c.fill();
+  c.fillStyle = p.base;
+  ell(c, 38, 41, 5.6, 5.6);
+  c.fill();
+  c.strokeStyle = p.crev;
+  c.lineWidth = 1.6;
+  line(c, 38, 41, 41.5, 38);
   // rivets
-  c.fillStyle = p.dark;
+  c.fillStyle = p.crev;
   for (const [rx, ry] of [
-    [20, 27],
-    [52, 27],
-    [20, 52],
-    [52, 52],
-  ]) {
-    c.beginPath();
-    c.arc(rx, ry, 1.6, 0, Math.PI * 2);
+    [20, 28.5],
+    [55, 28.5],
+    [20, 55],
+    [55, 55],
+  ] as const) {
+    ell(c, rx, ry, 1.5, 1.5);
     c.fill();
   }
 
-  // head
+  // dome head + antenna
   c.fillStyle = p.base;
-  rr(c, 22, 8, 28, 18, 7);
+  c.beginPath();
+  c.arc(36, 16, 12, Math.PI, 0);
+  c.lineTo(48, 22);
+  c.quadraticCurveTo(36, 26, 24, 22);
+  c.closePath();
+  c.fill();
+  c.fillStyle = p.light;
+  c.beginPath();
+  c.arc(33.5, 15.2, 8.6, Math.PI, Math.PI * 1.96);
+  c.closePath();
+  c.fill();
+  c.strokeStyle = p.crev;
+  c.lineWidth = 1.8;
+  line(c, 36, 4.5, 36, 8.5);
+  c.fillStyle = '#e5484d';
+  ell(c, 36, 3.6, 2, 2);
   c.fill();
   // eye (faces left)
+  c.fillStyle = p.crev;
+  ell(c, 27.5, 17.5, 4.2, 4.2);
+  c.fill();
   c.fillStyle = '#e5484d';
-  c.beginPath();
-  c.arc(29, 17, 3.4, 0, Math.PI * 2);
+  ell(c, 27.5, 17.5, 3, 3);
   c.fill();
   c.fillStyle = '#ffd9da';
-  c.beginPath();
-  c.arc(28, 15.8, 1.2, 0, Math.PI * 2);
+  ell(c, 26.4, 16.4, 1.1, 1.1);
   c.fill();
 
   // arm cannon (left)
-  c.fillStyle = p.dark;
-  rr(c, 6, 34, 14, 8, 4);
+  c.fillStyle = p.crev;
+  rr(c, 4, 36, 15, 8.5, 4);
+  c.fill();
+  c.fillStyle = p.base;
+  rr(c, 5, 37, 12, 5, 2.5);
   c.fill();
 
-  // occlusion right edge
-  c.fillStyle = p.dark;
-  c.globalAlpha = 0.45;
-  rr(c, 50, 24, 6, 32, 4);
+  // sheen + hard specs
+  c.fillStyle = p.sheen;
+  ell(c, 29, 9.6, 4.4, 1.8, -0.25);
   c.fill();
-  c.globalAlpha = 1;
-
-  // specular hits
   c.fillStyle = p.spec;
-  c.beginPath();
-  c.ellipse(28, 11.4, 4.6, 1.7, -0.2, 0, Math.PI * 2);
+  ell(c, 30.5, 8.2, 2, 1, -0.25);
   c.fill();
-  c.beginPath();
-  c.ellipse(22, 27.5, 2.6, 1.3, -0.4, 0, Math.PI * 2);
+  ell(c, 21.5, 29.5, 2.2, 1.1, -0.5);
   c.fill();
+  // cool rim on dome back
+  c.strokeStyle = RIM;
+  c.lineWidth = 1.2;
+  c.beginPath();
+  c.arc(36, 16, 11.4, Math.PI * 1.55, Math.PI * 1.95);
+  c.stroke();
 }
 
-/** Toy dinosaur boss (M3). Cell 84x72, base center (42, 64), faces left. */
-function dino(c: CanvasRenderingContext2D, p: Palette) {
-  c.fillStyle = p.dark;
-  c.beginPath();
-  c.ellipse(42, 64, 26, 6, 0, 0, Math.PI * 2);
-  c.fill();
+/** Toy dinosaur boss (M3). Cell 88x74, base center (44, 66), faces left. */
+function dino(c: CanvasRenderingContext2D, p: Plastic) {
+  ovalBase(c, p, 44, 66, 27);
 
   c.fillStyle = p.base;
-  // tail (right)
+  // tail (right, whipping up)
   c.beginPath();
-  c.moveTo(58, 38);
-  c.quadraticCurveTo(80, 30, 82, 20);
-  c.quadraticCurveTo(74, 34, 56, 44);
+  c.moveTo(60, 38);
+  c.quadraticCurveTo(84, 30, 86, 18);
+  c.quadraticCurveTo(77, 34, 58, 45);
   c.closePath();
   c.fill();
-  // body
-  c.beginPath();
-  c.ellipse(48, 42, 20, 15, -0.15, 0, Math.PI * 2);
+  // haunch + body
+  ell(c, 52, 42, 20, 15, -0.12);
   c.fill();
   // legs
-  rr(c, 36, 48, 10, 16, 4);
+  rr(c, 38, 48, 10.5, 17, 4.5);
   c.fill();
-  rr(c, 52, 48, 10, 14, 4);
+  rr(c, 55, 48, 10, 15, 4.5);
   c.fill();
-  // neck + head (left)
+  // toes
+  c.fillStyle = p.crev;
+  rr(c, 35.5, 61, 15, 5, 2.5);
+  c.fill();
+  rr(c, 53, 60, 13.5, 5, 2.5);
+  c.fill();
+  // neck + head (left, lunging low)
+  c.fillStyle = p.base;
   c.beginPath();
-  c.moveTo(34, 38);
-  c.quadraticCurveTo(24, 26, 18, 22);
-  c.lineTo(30, 20);
-  c.quadraticCurveTo(38, 28, 40, 34);
+  c.moveTo(36, 36);
+  c.quadraticCurveTo(26, 28, 20, 24);
+  c.lineTo(32, 20);
+  c.quadraticCurveTo(40, 27, 42, 33);
   c.closePath();
   c.fill();
-  c.beginPath();
-  c.ellipse(17, 21, 11, 7, -0.2, 0, Math.PI * 2);
+  ell(c, 17, 23, 12, 7.5, -0.18);
   c.fill();
-  // jaw
-  c.fillStyle = p.dark;
+  // open jaw
+  c.fillStyle = p.crev;
   c.beginPath();
-  c.moveTo(8, 23);
-  c.lineTo(20, 25);
-  c.lineTo(9, 27.5);
+  c.moveTo(6.5, 24);
+  c.lineTo(21, 26.5);
+  c.lineTo(9, 30);
   c.closePath();
   c.fill();
+  // teeth
+  c.fillStyle = p.spec;
+  for (let i = 0; i < 3; i++) {
+    c.beginPath();
+    c.moveTo(9 + i * 3.6, 24.4 + i * 0.4);
+    c.lineTo(10.6 + i * 3.6, 26.3 + i * 0.4);
+    c.lineTo(11.6 + i * 3.6, 24.7 + i * 0.4);
+    c.closePath();
+    c.fill();
+  }
   // eye
+  c.fillStyle = p.crev;
+  ell(c, 15.5, 20, 2, 2);
+  c.fill();
   c.fillStyle = '#1e1508';
-  c.beginPath();
-  c.arc(15, 18.5, 1.8, 0, Math.PI * 2);
+  ell(c, 15.2, 19.8, 1.2, 1.2);
   c.fill();
   // back plates
-  c.fillStyle = p.dark;
+  c.fillStyle = p.crev;
   for (const [px, py, r] of [
-    [40, 27, 5],
-    [50, 28, 6],
-    [60, 32, 5],
-  ]) {
+    [42, 26.5, 5.5],
+    [53, 27.5, 6.5],
+    [63, 31.5, 5.5],
+  ] as const) {
     c.beginPath();
     c.moveTo(px - r, py + 2);
     c.lineTo(px, py - r);
@@ -356,31 +600,45 @@ function dino(c: CanvasRenderingContext2D, p: Palette) {
     c.closePath();
     c.fill();
   }
-  // occlusion under belly
-  c.globalAlpha = 0.4;
-  c.beginPath();
-  c.ellipse(48, 52, 16, 6, 0, 0, Math.PI * 2);
+  // belly occlusion
+  c.fillStyle = p.crev;
+  c.globalAlpha = 0.5;
+  ell(c, 52, 52, 16, 5.5);
   c.fill();
   c.globalAlpha = 1;
-  // specular
+  // top light
+  c.fillStyle = p.light;
+  ell(c, 48, 33, 13, 5, -0.15);
+  c.fill();
+  ell(c, 15, 20.5, 7, 3, -0.2);
+  c.fill();
+  // sheen + specs
+  c.fillStyle = p.sheen;
+  ell(c, 46, 31, 6, 2, -0.15);
+  c.fill();
   c.fillStyle = p.spec;
-  c.beginPath();
-  c.ellipse(14, 17, 3.2, 1.4, -0.4, 0, Math.PI * 2);
+  ell(c, 13.5, 18.6, 2.4, 1, -0.3);
   c.fill();
-  c.beginPath();
-  c.ellipse(44, 32, 4.4, 1.8, -0.2, 0, Math.PI * 2);
+  ell(c, 45, 30, 2.6, 1, -0.15);
   c.fill();
+  // rim along the spine
+  c.strokeStyle = RIM;
+  c.lineWidth = 1.1;
+  c.beginPath();
+  c.moveTo(34, 29);
+  c.quadraticCurveTo(48, 24, 60, 30);
+  c.stroke();
 }
 
 /** Soft contact shadow, baked radial gradient (bake-time only). */
 function shadow(c: CanvasRenderingContext2D) {
   const g = c.createRadialGradient(24, 10, 2, 24, 10, 22);
-  g.addColorStop(0, 'rgba(20,12,4,0.42)');
-  g.addColorStop(1, 'rgba(20,12,4,0)');
+  g.addColorStop(0, 'rgba(26,14,6,0.4)');
+  g.addColorStop(1, 'rgba(26,14,6,0)');
   c.fillStyle = g;
   c.save();
   c.translate(0, 10);
-  c.scale(1, 0.42);
+  c.scale(1, 0.4);
   c.translate(0, -10);
   c.beginPath();
   c.arc(24, 10, 22, 0, Math.PI * 2);
@@ -388,9 +646,10 @@ function shadow(c: CanvasRenderingContext2D) {
   c.restore();
 }
 
-/** Scrap pip: a molten little plastic nugget. */
+/** Scrap pip: a chip of green plastic, same 5-value language. */
 function pip(c: CanvasRenderingContext2D) {
-  c.fillStyle = '#57862f';
+  const p = GREEN_P;
+  c.fillStyle = p.base;
   c.beginPath();
   c.moveTo(8, 1.5);
   c.lineTo(14.5, 6);
@@ -399,7 +658,7 @@ function pip(c: CanvasRenderingContext2D) {
   c.lineTo(1.5, 7);
   c.closePath();
   c.fill();
-  c.fillStyle = '#3a5c1e';
+  c.fillStyle = p.crev;
   c.beginPath();
   c.moveTo(12.5, 13.5);
   c.lineTo(4.5, 14);
@@ -407,9 +666,16 @@ function pip(c: CanvasRenderingContext2D) {
   c.lineTo(6, 9);
   c.closePath();
   c.fill();
-  c.fillStyle = '#ddf0c0';
+  c.fillStyle = p.light;
   c.beginPath();
-  c.ellipse(6.4, 4.6, 2.6, 1.5, -0.5, 0, Math.PI * 2);
+  c.moveTo(8, 1.5);
+  c.lineTo(14.5, 6);
+  c.lineTo(9, 7.5);
+  c.lineTo(4, 5);
+  c.closePath();
+  c.fill();
+  c.fillStyle = p.spec;
+  ell(c, 6.6, 4.4, 2.2, 1.2, -0.5);
   c.fill();
 }
 
@@ -423,114 +689,271 @@ function tracer(c: CanvasRenderingContext2D) {
   c.fill();
 }
 
-/** The Molder body: toy injection press. Cell 120x150. Piston is a separate sprite. */
+/** Muzzle flash star: white core, warm fringe, 1–2 frame life. */
+function muzzle(c: CanvasRenderingContext2D) {
+  c.save();
+  c.translate(11, 11);
+  c.fillStyle = 'rgba(255,190,80,0.85)';
+  c.beginPath();
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * Math.PI * 2;
+    c.lineTo(Math.cos(a) * 10, Math.sin(a) * 10);
+    c.lineTo(Math.cos(a + 0.63) * 4, Math.sin(a + 0.63) * 4);
+  }
+  c.closePath();
+  c.fill();
+  c.fillStyle = '#fffbe8';
+  ell(c, 0, 0, 4.2, 4.2);
+  c.fill();
+  c.restore();
+}
+
+/**
+ * The Molder — hero of the left side. Chunky red toy injection press:
+ * C-frame, hopper of pellets up top, stamping platform, sticker label.
+ * Cell 150x180, anchor bottom-center. Piston is a separate sprite.
+ */
 function molderBody(c: CanvasRenderingContext2D) {
   const red = '#c8452c';
-  const redD = '#8d2c1b';
-  const redL = '#f4e3d7';
-  const steel = '#7d838d';
-  const steelD = '#4f545c';
+  const redD = '#7e2413';
+  const redL = '#e0674b';
+  const redSheen = '#f0937b';
+  const spec = '#fdeee8';
+  const steel = '#8b919b';
+  const steelD = '#565b63';
+  const steelL = '#aeb4be';
+  const gold = '#d9a62e';
 
-  // base plate / output tray
+  // baked contact shadow under the machine
+  const sh = c.createRadialGradient(75, 168, 8, 75, 168, 62);
+  sh.addColorStop(0, 'rgba(26,14,6,0.4)');
+  sh.addColorStop(1, 'rgba(26,14,6,0)');
+  c.fillStyle = sh;
+  c.save();
+  c.translate(0, 168);
+  c.scale(1, 0.22);
+  c.translate(0, -168);
+  c.beginPath();
+  c.arc(75, 168, 62, 0, Math.PI * 2);
+  c.fill();
+  c.restore();
+
+  // base plinth (top face + front face = high-angle read)
+  c.fillStyle = redD;
+  rr(c, 12, 150, 126, 20, 8);
+  c.fill();
+  c.fillStyle = red;
+  rr(c, 12, 144, 126, 18, 8);
+  c.fill();
+  c.fillStyle = redL;
+  rr(c, 16, 145.5, 118, 7, 5);
+  c.fill();
+
+  // output tray (steel, right side, where soldiers pop out)
   c.fillStyle = steelD;
-  rr(c, 6, 128, 108, 16, 6);
+  rr(c, 62, 138, 78, 12, 5);
   c.fill();
   c.fillStyle = steel;
-  rr(c, 8, 124, 104, 12, 6);
+  rr(c, 62, 134, 78, 10, 5);
+  c.fill();
+  c.fillStyle = steelL;
+  rr(c, 65, 135, 72, 4, 3);
   c.fill();
 
   // frame column (left)
   c.fillStyle = red;
-  rr(c, 10, 26, 26, 104, 8);
+  rr(c, 18, 34, 30, 116, 10);
   c.fill();
   c.fillStyle = redD;
-  c.globalAlpha = 0.5;
-  rr(c, 10, 26, 7, 104, 6);
+  c.globalAlpha = 0.75;
+  rr(c, 18, 34, 8, 116, 8);
   c.fill();
   c.globalAlpha = 1;
+  c.fillStyle = redL;
+  rr(c, 38, 38, 7, 108, 4);
+  c.fill();
 
   // top crossbeam
   c.fillStyle = red;
-  rr(c, 10, 16, 96, 24, 9);
+  rr(c, 18, 20, 114, 28, 11);
   c.fill();
   c.fillStyle = redD;
-  c.globalAlpha = 0.45;
-  rr(c, 10, 32, 96, 8, 5);
+  c.globalAlpha = 0.6;
+  rr(c, 18, 39, 114, 9, 6);
   c.fill();
   c.globalAlpha = 1;
+  c.fillStyle = redL;
+  rr(c, 24, 23, 102, 8, 5);
+  c.fill();
+  c.fillStyle = redSheen;
+  rr(c, 28, 24.5, 40, 3.5, 2);
+  c.fill();
 
-  // hopper funnel on top
+  // hopper funnel with green pellets
   c.fillStyle = steel;
   c.beginPath();
-  c.moveTo(48, 2);
-  c.lineTo(88, 2);
-  c.lineTo(76, 20);
-  c.lineTo(60, 20);
+  c.moveTo(58, 4);
+  c.lineTo(112, 4);
+  c.lineTo(96, 24);
+  c.lineTo(74, 24);
+  c.closePath();
+  c.fill();
+  c.fillStyle = steelL;
+  c.beginPath();
+  c.moveTo(58, 4);
+  c.lineTo(70, 4);
+  c.lineTo(80, 24);
+  c.lineTo(74, 24);
   c.closePath();
   c.fill();
   c.fillStyle = steelD;
-  c.beginPath();
-  c.ellipse(68, 3, 20, 3.4, 0, 0, Math.PI * 2);
+  ell(c, 85, 5, 27, 4.6);
   c.fill();
-  c.fillStyle = '#57862f';
-  c.beginPath();
-  c.ellipse(68, 3.4, 16, 2.4, 0, 0, Math.PI * 2);
+  // pellets heap
+  const gp = GREEN_P;
+  c.fillStyle = gp.base;
+  ell(c, 85, 4.6, 23, 3.4);
   c.fill();
-
-  // stamping platform
-  c.fillStyle = steel;
-  rr(c, 46, 116, 56, 10, 4);
-  c.fill();
-  c.fillStyle = steelD;
-  rr(c, 46, 122, 56, 4, 2);
-  c.fill();
-
-  // bolts
-  c.fillStyle = redD;
-  for (const [bx, by] of [
-    [16, 22],
-    [100, 22],
-    [16, 122],
-    [30, 122],
-  ]) {
-    c.beginPath();
-    c.arc(bx, by, 2.4, 0, Math.PI * 2);
+  for (const [px, py] of [
+    [72, 4],
+    [80, 2.8],
+    [88, 4.4],
+    [96, 3.2],
+    [84, 5.6],
+    [76, 5.8],
+    [92, 5.4],
+  ] as const) {
+    c.fillStyle = gp.light;
+    ell(c, px, py, 2.6, 1.7, 0.4);
     c.fill();
   }
-
-  // specular hits (hard-edged)
-  c.fillStyle = redL;
-  c.beginPath();
-  c.ellipse(20, 20.5, 6, 2, -0.15, 0, Math.PI * 2);
+  c.fillStyle = gp.spec;
+  ell(c, 79, 3.2, 1.4, 0.8, -0.4);
   c.fill();
-  c.beginPath();
-  c.ellipse(14.5, 40, 2, 8, 0, 0, Math.PI * 2);
+  ell(c, 90, 4.2, 1.2, 0.7, 0.3);
+  c.fill();
+
+  // stamping platform (steel anvil under the piston)
+  c.fillStyle = steelD;
+  rr(c, 56, 128, 66, 10, 4);
+  c.fill();
+  c.fillStyle = steel;
+  rr(c, 56, 124, 66, 9, 4);
+  c.fill();
+  c.fillStyle = steelL;
+  rr(c, 59, 125, 60, 3.5, 2);
+  c.fill();
+
+  // sticker label on the column: cream sticker, worn corner
+  c.save();
+  c.translate(33, 86);
+  c.rotate(-1.5708); // vertical sticker
+  c.fillStyle = '#f5e9d0';
+  rr(c, -26, -9, 52, 18, 4);
+  c.fill();
+  c.fillStyle = '#d9c5a0';
+  rr(c, -26, 4, 52, 5, 2);
+  c.fill();
+  // stripes suggesting text
+  c.fillStyle = '#c8452c';
+  rr(c, -20, -5.5, 40, 6, 3);
+  c.fill();
+  c.fillStyle = '#8a7a5c';
+  rr(c, -16, 3.5, 32, 2.6, 1.3);
+  c.fill();
+  c.restore();
+
+  // gold bolts
+  c.fillStyle = gold;
+  for (const [bx, by] of [
+    [25, 27],
+    [124, 27],
+    [25, 140],
+    [43, 140],
+  ] as const) {
+    ell(c, bx, by, 3, 3);
+    c.fill();
+    c.fillStyle = '#f6e3ae';
+    ell(c, bx - 0.9, by - 0.9, 1, 1);
+    c.fill();
+    c.fillStyle = gold;
+  }
+
+  // hard specs on beam + column
+  c.fillStyle = spec;
+  ell(c, 30, 22.5, 5.5, 1.8, -0.1);
+  c.fill();
+  ell(c, 41.5, 48, 2, 6, 0);
   c.fill();
 }
 
-/** Piston head: rams down onto the platform. Cell 64x60, anchor top-center. */
+/** Piston: steel shaft + red ram head with a yellow chevron. Cell 76x74, anchor top-center. */
 function molderPiston(c: CanvasRenderingContext2D) {
   const steel = '#8b919b';
   const steelD = '#565b63';
-  const spec = '#eef1f6';
+  const steelL = '#aeb4be';
   // shaft
   c.fillStyle = steelD;
-  rr(c, 26, 0, 12, 34, 3);
+  rr(c, 30, 0, 16, 40, 4);
   c.fill();
   c.fillStyle = steel;
-  rr(c, 28, 0, 5, 34, 2);
+  rr(c, 33, 0, 8, 40, 3);
   c.fill();
-  // head block
+  c.fillStyle = steelL;
+  rr(c, 34.5, 0, 3, 40, 1.5);
+  c.fill();
+  // spring coils
+  c.strokeStyle = steelD;
+  c.lineWidth = 2.4;
+  for (let i = 0; i < 3; i++) {
+    c.beginPath();
+    c.ellipse(38, 8 + i * 8, 11, 3.2, 0, 0, Math.PI * 2);
+    c.stroke();
+  }
+  // ram head
   c.fillStyle = '#c8452c';
-  rr(c, 8, 32, 48, 22, 6);
+  rr(c, 8, 38, 60, 26, 8);
   c.fill();
-  c.fillStyle = '#8d2c1b';
-  rr(c, 8, 48, 48, 6, 4);
+  c.fillStyle = '#7e2413';
+  rr(c, 8, 57, 60, 7, 5);
   c.fill();
-  c.fillStyle = spec;
+  c.fillStyle = '#e0674b';
+  rr(c, 12, 40, 52, 7, 4);
+  c.fill();
+  // yellow chevron
+  c.fillStyle = '#d9a62e';
   c.beginPath();
-  c.ellipse(18, 36.5, 5, 1.7, -0.15, 0, Math.PI * 2);
+  c.moveTo(30, 48);
+  c.lineTo(38, 55);
+  c.lineTo(46, 48);
+  c.lineTo(42, 48);
+  c.lineTo(38, 51.4);
+  c.lineTo(34, 48);
+  c.closePath();
   c.fill();
+  // spec
+  c.fillStyle = '#fdeee8';
+  ell(c, 18, 41.5, 4.6, 1.6, -0.1);
+  c.fill();
+}
+
+/** Loose pellets sitting in the hopper (shimmer sprite, alpha-pulsed). */
+function pellets(c: CanvasRenderingContext2D) {
+  const p = GREEN_P;
+  for (const [px, py, r] of [
+    [8, 8, 3],
+    [16, 6, 2.6],
+    [24, 8.4, 3],
+    [32, 6.4, 2.4],
+    [38, 8.2, 2.6],
+  ] as const) {
+    c.fillStyle = p.sheen;
+    ell(c, px, py, r, r * 0.7, 0.3);
+    c.fill();
+    c.fillStyle = p.spec;
+    ell(c, px - 0.8, py - 0.8, r * 0.4, r * 0.28, -0.4);
+    c.fill();
+  }
 }
 
 /** Expanding shockwave ring for the rubber band snap. */
@@ -547,7 +970,7 @@ function ring(c: CanvasRenderingContext2D) {
   c.stroke();
 }
 
-/** Plastic shard for knockover bursts (tinted per faction at runtime). */
+/** Plastic shard for knockover bursts (white; tinted per faction at runtime). */
 function shard(c: CanvasRenderingContext2D) {
   c.fillStyle = '#ffffff';
   c.beginPath();
@@ -575,11 +998,4 @@ function spark(c: CanvasRenderingContext2D) {
   c.beginPath();
   c.arc(5, 5, 5, 0, Math.PI * 2);
   c.fill();
-}
-
-function line(c: CanvasRenderingContext2D, x1: number, y1: number, x2: number, y2: number) {
-  c.beginPath();
-  c.moveTo(x1, y1);
-  c.lineTo(x2, y2);
-  c.stroke();
 }

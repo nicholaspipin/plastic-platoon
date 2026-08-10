@@ -75,7 +75,7 @@ export const WAVES = {
   baseCount: 4,
   countGrowth: 1.2, // + round(wave * growth)
   intermission: 2.5, // seconds between waves
-  spawnStagger: 0.14, // seconds between tan spawns within a wave
+  spawnStagger: 0.06, // seconds between tan spawns — short, so waves crest together
 };
 
 export const OFFLINE = {
@@ -93,10 +93,13 @@ export const PRESTIGE = {
 };
 
 // Layout fractions of the logical viewport.
+// Battle band sits inside the tilt-shift sharp zone (0.39–0.71 + early ramp).
 export const LAYOUT = {
-  bandTop: 0.34, // battle band vertical extent
-  bandBot: 0.8,
-  molderX: 60, // px from left
+  bandTop: 0.41, // battle band vertical extent
+  bandBot: 0.73,
+  molderX: 68, // px from left
+  molderY: 0.62, // fraction of height — where the machine's base sits
+  hopperDY: -170, // hopper mouth offset from molder base (px)
   rallyX: 0.54, // greens hold this line when unopposed (fraction of width)
   tanStopX: 175, // tans never advance past this (px from left) — no fail state
 };
