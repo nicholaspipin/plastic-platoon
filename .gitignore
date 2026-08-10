@@ -1,7 +1,10 @@
 node_modules
 dist
 .vite
+.expo
+.expo-shared
 work/screenshots
+work/expo-web-export
 work/screenshot-review.md
 work/*.log
 *.tsbuildinfo

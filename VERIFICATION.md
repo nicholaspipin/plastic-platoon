@@ -9,6 +9,8 @@ Commands run successfully:
 - `npm run save:check`
 - `npm run screenshots`
 - `npm run probe`
+- `npx expo config --type public`
+- `npx expo export --platform web --output-dir work\expo-web-export --clear`
 
 Latest sustained perf probe:
 
@@ -34,3 +36,4 @@ Automated flow coverage:
 Known caveat:
 
 - Headless Chromium RAF timing can be throttled on this machine, so the perf gate asserts deterministic CPU frame cost under sustained pressure. Real iPhone validation is still required before treating the 60fps target as device-proven.
+- The Expo shell currently loads the deployed GitHub Pages URL via WebView. Native offline bundling of the game assets is a future packaging step if fully offline native launch is required.
