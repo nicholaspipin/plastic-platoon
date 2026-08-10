@@ -57,6 +57,8 @@ export class Renderer {
   private rings: RingFx[] = [];
   private flashes: Flash[] = [];
   private shards: Shard[] = [];
+  private marchTex: Texture[][] = [];
+  private fireTex: Texture[] = [];
   private molderBase!: Sprite;
   private piston!: Sprite;
   private pellets!: Sprite;
@@ -95,6 +97,11 @@ export class Renderer {
     });
 
     this.atlas = bakeAtlas();
+    this.marchTex = [
+      [this.atlas.tex.green_march0, this.atlas.tex.green_march1],
+      [this.atlas.tex.tan_march0, this.atlas.tex.tan_march1],
+    ];
+    this.fireTex = [this.atlas.tex.green_fire, this.atlas.tex.tan_fire];
 
     this.world.addChild(
       this.groundLayer,
@@ -197,9 +204,14 @@ export class Renderer {
     return this.h * LAYOUT.molderY - 180;
   }
 
+  private bakedW = 0;
+  private bakedH = 0;
+
   layout(sim: Sim) {
     sim.resize(this.w, this.h);
-    if (this.groundZone !== sim.state.zone) {
+    // rebake when the room OR the viewport changed (iOS toolbar collapse and
+    // rotation resize the canvas; a stale bake mis-sizes ground + blur bands)
+    if (this.groundZone !== sim.state.zone || this.bakedW !== this.w || this.bakedH !== this.h) {
       this.rebakeGround(sim.state.zone);
     }
     const my = this.h * LAYOUT.molderY;
@@ -230,13 +242,17 @@ export class Renderer {
 
   rebakeGround(zone: number) {
     this.groundZone = zone;
+    this.bakedW = this.w;
+    this.bakedH = this.h;
+    // textureSource: true is required — without it Pixi keeps the GL texture
+    // AND the full-screen backing canvas alive forever (~18MB per rebake)
     if (this.groundSprite) {
-      this.groundSprite.destroy({ texture: true });
+      this.groundSprite.destroy({ texture: true, textureSource: true });
       this.groundSprite = null;
     }
     if (this.tiltTop) {
-      this.tiltTop.destroy({ texture: true });
-      this.tiltBottom?.destroy({ texture: true });
+      this.tiltTop.destroy({ texture: true, textureSource: true });
+      this.tiltBottom?.destroy({ texture: true, textureSource: true });
       this.tiltTop = this.tiltBottom = null;
     }
     const bake = bakeGround(this.w, this.h, zone, mulberry32(1234 + zone));
@@ -500,18 +516,15 @@ export class Renderer {
       const x = u.px + (u.x - u.px) * alpha;
       const y = u.py + (u.y - u.py) * alpha;
 
-      // texture selection
+      // texture selection (pre-resolved arrays — no per-frame string keys)
       let tex: Texture;
       if (u.kind === 'robot') tex = this.atlas.tex.robot;
       else if (u.kind === 'dino') tex = this.atlas.tex.dino;
+      else if (u.state === 'fight') tex = this.fireTex[u.faction];
       else {
-        const fac = u.faction === 0 ? 'green' : 'tan';
-        if (u.state === 'fight') tex = this.atlas.tex[`${fac}_fire`];
-        else {
-          // march on twos: 2-frame cycle stepped (~12fps handmade feel)
-          const frame = Math.floor(t * 6 + u.phase * 2) % 2;
-          tex = this.atlas.tex[`${fac}_march${frame}`];
-        }
+        // march on twos: 2-frame cycle stepped (~12fps handmade feel)
+        const frame = Math.floor(t * 6 + u.phase * 2) % 2;
+        tex = this.marchTex[u.faction][frame];
       }
       if (body.texture !== tex) body.texture = tex;
       // zone skin: under the bed, the invaders are dusty gray-blue
@@ -567,7 +580,7 @@ export class Renderer {
       body.rotation = rot;
       body.alpha = alphaV;
       body.scale.set(sx, sy);
-      body.zIndex = y;
+      body.zIndex = y | 0; // integer z: static lines skip the per-frame re-sort
       sh.position.set(x, y - 1);
       sh.alpha = alphaV * 0.9;
       sh.scale.set(big + (bob < 0 ? bob * 0.012 : 0), big + (bob < 0 ? bob * 0.012 : 0));

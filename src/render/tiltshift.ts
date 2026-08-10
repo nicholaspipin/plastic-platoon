@@ -1,10 +1,14 @@
 import { Sprite, Texture } from 'pixi.js';
 
 /**
- * Tilt-shift miniature pass (ART_NOTES §2), the cheap way: blur the baked ground
- * composite ONCE at bake time (ctx.filter — bake-time only, never per-frame),
- * cut top/bottom strips with alpha ramps baked in, and lay them over the world
- * as two static sprites. Zero per-frame cost.
+ * Tilt-shift miniature pass (ART_NOTES §2), the cheap way: blur strips of the
+ * baked ground ONCE at bake time (ctx.filter — bake-time only, never per-frame)
+ * and lay them over the world as two static sprites. Zero per-frame cost.
+ *
+ * Cost control (perf audit): only the two strip regions are blurred (the sharp
+ * middle ~32% is never touched), and the blur runs at HALF device resolution —
+ * it's blurred anyway, so the upscale is invisible. ~8x cheaper than blurring
+ * the full composite at full res, which stalled mid-game rebakes on phones.
  *
  * Band geometry (fractions of H):
  *   full blur 0 → 0.27, ramp to sharp by 0.39 | sharp 0.39 → 0.71 | ramp to
@@ -22,67 +26,87 @@ export function bakeTiltShift(
   h: number,
   scale: number
 ): TiltShift {
-  // blurred copy of the whole composite (10px ≈ 1.2% of H at 844pt)
-  const blurPx = Math.max(6, Math.round(h * 0.012)) * scale;
-  const blurred = document.createElement('canvas');
-  blurred.width = groundCanvas.width;
-  blurred.height = groundCanvas.height;
-  const bc = blurred.getContext('2d')!;
-  bc.filter = `blur(${blurPx}px)`;
-  bc.drawImage(groundCanvas, 0, 0);
-  // re-draw edges to fight blur's transparent fringe
-  bc.filter = `blur(${Math.round(blurPx / 2)}px)`;
-  bc.drawImage(groundCanvas, 0, 0);
-  bc.filter = 'none';
+  const blurPx = Math.max(6, Math.round(h * 0.012)); // CSS px (≈1.2% of H)
 
   const topH = Math.round(h * 0.39);
   const botY = Math.round(h * 0.71);
   const botH = h - botY;
 
-  const top = strip(blurred, scale, 0, topH, (g) => {
+  const top = blurStrip(groundCanvas, scale, 0, topH, blurPx, (g) => {
     g.addColorStop(0, 'rgba(0,0,0,1)');
     g.addColorStop(0.27 / 0.39, 'rgba(0,0,0,1)');
     g.addColorStop(1, 'rgba(0,0,0,0)');
   });
-  top.sprite.position.set(0, 0);
+  top.position.set(0, 0);
 
-  const bottom = strip(blurred, scale, botY, botH, (g) => {
+  const bottom = blurStrip(groundCanvas, scale, botY, botH, blurPx, (g) => {
     g.addColorStop(0, 'rgba(0,0,0,0)');
     g.addColorStop((0.8 - 0.71) / (1 - 0.71), 'rgba(0,0,0,1)');
     g.addColorStop(1, 'rgba(0,0,0,1)');
   });
-  bottom.sprite.position.set(0, botY);
+  bottom.position.set(0, botY);
 
-  return { top: top.sprite, bottom: bottom.sprite };
+  return { top, bottom };
 }
 
-function strip(
-  blurred: HTMLCanvasElement,
+function blurStrip(
+  ground: HTMLCanvasElement,
   scale: number,
   srcY: number,
   srcH: number,
-  stops: (g: CanvasLinearGradient) => void
-): { sprite: Sprite } {
-  const canvas = document.createElement('canvas');
-  canvas.width = blurred.width;
-  canvas.height = Math.ceil(srcH * scale);
-  const c = canvas.getContext('2d')!;
-  c.drawImage(
-    blurred,
+  blurPx: number,
+  stops: (g: CanvasGradient) => void
+): Sprite {
+  const HALF = 0.5; // blur resolution relative to device pixels
+  const pad = blurPx * 2; // sample past the strip edge so the blur doesn't fringe
+  const padTop = Math.min(pad, srcY);
+  const padH = srcH + padTop + pad;
+
+  // 1. downscale the strip region (+padding) to half res and blur it there
+  const small = document.createElement('canvas');
+  small.width = Math.max(1, Math.round(ground.width * HALF));
+  small.height = Math.max(1, Math.round(padH * scale * HALF));
+  const sc = small.getContext('2d')!;
+  sc.filter = `blur(${Math.max(2, Math.round(blurPx * scale * HALF * 0.5))}px)`;
+  sc.drawImage(
+    ground,
     0,
-    srcY * scale,
-    blurred.width,
-    srcH * scale,
+    (srcY - padTop) * scale,
+    ground.width,
+    padH * scale,
+    0,
+    0,
+    small.width,
+    small.height
+  );
+  sc.filter = 'none';
+  // second, lighter pass tightens the gaussian and fights edge fringe
+  sc.globalAlpha = 0.6;
+  sc.filter = `blur(${Math.max(1, Math.round(blurPx * scale * HALF * 0.25))}px)`;
+  sc.drawImage(small, 0, 0);
+  sc.filter = 'none';
+  sc.globalAlpha = 1;
+
+  // 2. upscale into the final strip canvas, darken slightly, bake the alpha ramp
+  const canvas = document.createElement('canvas');
+  canvas.width = ground.width;
+  canvas.height = Math.max(1, Math.ceil(srcH * scale));
+  const c = canvas.getContext('2d')!;
+  const offY = (padTop / padH) * small.height;
+  c.drawImage(
+    small,
+    0,
+    offY,
+    small.width,
+    small.height * (srcH / padH),
     0,
     0,
     canvas.width,
     canvas.height
   );
-  // slight darken inside the blur zone helps the depth read
   c.globalCompositeOperation = 'source-atop';
   c.fillStyle = 'rgba(20,8,2,0.1)';
   c.fillRect(0, 0, canvas.width, canvas.height);
-  // alpha ramp
   c.globalCompositeOperation = 'destination-in';
   const g = c.createLinearGradient(0, 0, 0, canvas.height);
   stops(g);
@@ -92,8 +116,5 @@ function strip(
 
   const tex = Texture.from(canvas);
   tex.source.resolution = scale;
-  const sprite = new Sprite(tex);
-  return { sprite };
+  return new Sprite(tex);
 }
-
-type CanvasLinearGradient = CanvasGradient;

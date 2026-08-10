@@ -317,9 +317,9 @@ export class Sim {
     this.events.push({ type: 'spawn', i });
   }
 
-  private spawnTan(kind: UnitKind) {
+  private spawnTan(kind: UnitKind): boolean {
     const i = this.alloc();
-    if (i < 0) return;
+    if (i < 0) return false;
     const u = this.units[i];
     const bandTop = this.h * LAYOUT.bandTop;
     const bandBot = this.h * LAYOUT.bandBot;
@@ -342,6 +342,7 @@ export class Sim {
     u.phase = this.rng() * Math.PI * 2;
     u.variant = (this.rng() * 3) | 0;
     this.events.push({ type: 'spawn', i });
+    return true;
   }
 
   private stepWaves(dt: number) {
@@ -350,11 +351,10 @@ export class Sim {
         this.spawnStaggerT -= dt;
         if (this.spawnStaggerT <= 0) {
           this.spawnStaggerT = WAVES.spawnStagger;
+          // only consume the spawn if the pool actually had a slot
           if (this.bossToSpawn) {
-            this.spawnTan(this.bossToSpawn);
-            this.bossToSpawn = null;
-          } else {
-            this.spawnTan('soldier');
+            if (this.spawnTan(this.bossToSpawn)) this.bossToSpawn = null;
+          } else if (this.spawnTan('soldier')) {
             this.toSpawn--;
           }
         }

@@ -30,9 +30,11 @@ const hud = new Hud(
   uiEl,
   {
     onBuy: (id) => {
+      sfx.unlock(); // a buy may be the returning player's first gesture
       sim.buy(id);
     },
     onMute: (muted) => {
+      sfx.unlock();
       sfx.muted = muted;
       persist();
     },
@@ -92,20 +94,12 @@ async function boot() {
 
   prestigeUi.bind(sim);
 
-  // offline earnings: one card max at session start (returning players only)
+  // offline earnings: one card max at session start (returning players only).
+  // Scrap is granted IMMEDIATELY — the save's lastSeen advances within seconds,
+  // so a claim-gated grant would be forfeited by any reload before the tap.
   if (save && seenIntro) {
     const offline = computeOffline(save);
-    if (offline) {
-      showOfflineCard(uiEl, offline, () => {
-        sim.state.scrap += offline.scrap;
-        sim.state.totalScrapEarned += offline.scrap;
-        sfx.unlock();
-        const fake = { type: 'buy', id: 'faster' } as const;
-        sfx.handleEvent(fake);
-        renderer.handleEvent(fake, sim); // molder celebrates the claim
-        persist();
-      });
-    }
+    if (offline) grantOffline(offline.scrap, offline.seconds);
   }
 
   let lastZone = sim.state.zone;
@@ -131,7 +125,8 @@ async function boot() {
       acc -= SIM_DT;
       steps++;
     }
-    if (steps === 6) acc = 0; // spiral-of-death guard
+    // spiral-of-death guard; clamp (not zero) keeps interpolation monotonic
+    if (steps === 6 && acc > SIM_DT) acc = SIM_DT * 0.999;
 
     // drain events to all consumers
     for (const e of sim.events) {
@@ -172,19 +167,33 @@ setInterval(persist, 5000);
 // iOS PWAs resume from memory rather than reloading, so the load-time offline
 // check never re-runs — do it on visibility return after a long background too.
 let hiddenAt = 0;
+let offlineCardOpen = false;
+
+function grantOffline(scrap: number, seconds: number) {
+  sim.state.scrap += scrap;
+  sim.state.totalScrapEarned += scrap;
+  persist();
+  if (offlineCardOpen) return; // never stack receipt cards
+  offlineCardOpen = true;
+  showOfflineCard(uiEl, { scrap, seconds }, () => {
+    offlineCardOpen = false;
+    sfx.unlock();
+    const fake = { type: 'buy', id: 'faster' } as const;
+    sfx.handleEvent(fake);
+    renderer.handleEvent(fake, sim); // the molder celebrates the claim
+  });
+}
+
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
     hiddenAt = Date.now();
     persist();
-  } else if (hiddenAt > 0 && !nosave) {
-    const offline = computeOffline({ lastSeen: hiddenAt, scrapRate: sim.scrapRate });
-    hiddenAt = 0;
-    if (offline) {
-      showOfflineCard(uiEl, offline, () => {
-        sim.state.scrap += offline.scrap;
-        sim.state.totalScrapEarned += offline.scrap;
-        persist();
-      });
+  } else {
+    sfx.unlock(); // recover from iOS 'interrupted' audio state
+    if (hiddenAt > 0 && !nosave) {
+      const offline = computeOffline({ lastSeen: hiddenAt, scrapRate: sim.scrapRate });
+      hiddenAt = 0;
+      if (offline) grantOffline(offline.scrap, offline.seconds);
     }
   }
 });
@@ -252,4 +261,12 @@ window.__pp = {
   },
 };
 
-void boot();
+boot().catch((err) => {
+  // WebGL denied / init failure: show something instead of a black void
+  const card = document.createElement('div');
+  card.className = 'intro-overlay';
+  card.innerHTML = `<div class="intro-card"><div class="intro-brand">OUT OF<br>BATTERIES</div>
+    <div class="intro-sub">This device couldn't start the battlefield (WebGL unavailable).<br>Try another browser or device.</div></div>`;
+  uiEl.appendChild(card);
+  console.error(err);
+});

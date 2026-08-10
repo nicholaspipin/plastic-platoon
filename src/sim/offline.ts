@@ -25,8 +25,9 @@ export function computeOffline(
 
 export function fmtDuration(seconds: number): string {
   if (seconds >= 3600) {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.round((seconds % 3600) / 60);
+    const totalMin = Math.round(seconds / 60);
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
     return m > 0 ? `${h}h ${m}m` : `${h}h`;
   }
   if (seconds >= 60) return `${Math.round(seconds / 60)}m`;

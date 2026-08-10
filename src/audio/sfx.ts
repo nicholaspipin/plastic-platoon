@@ -20,10 +20,13 @@ export class Sfx {
   // rate limiting so 40 rifles don't stack 40 cracks per frame
   private lastFire = 0;
   private lastTok = 0;
+  private lastBlip = 0;
 
   unlock() {
     if (this.ctx) {
-      if (this.ctx.state === 'suspended') void this.ctx.resume();
+      // iOS sets a non-standard 'interrupted' state after calls/Siri — resume
+      // from anything that isn't running, or audio dies for the session
+      if (this.ctx.state !== 'running') void this.ctx.resume();
       return;
     }
     try {
@@ -70,7 +73,12 @@ export class Sfx {
       case 'collect': {
         if (t - this.lastCollect > 1) this.collectStep = 0;
         this.lastCollect = t;
-        this.blip(t, this.collectStep);
+        // rate-limited: a band snap lands dozens of collects in one frame,
+        // which would stack into hard clipping
+        if (t - this.lastBlip > 0.04) {
+          this.lastBlip = t;
+          this.blip(t, this.collectStep);
+        }
         this.collectStep = Math.min(this.collectStep + 1, 14);
         break;
       }

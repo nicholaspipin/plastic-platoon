@@ -54,18 +54,18 @@ await page.waitForFunction(() => window.__pp !== undefined);
 const card = page.locator('.card-overlay');
 const cardShown = await card.waitFor({ state: 'visible', timeout: 4000 }).then(() => true).catch(() => false);
 check('offline card appears after 3h away', cardShown);
-let claimed = 0;
 if (cardShown) {
-  const before = await page.evaluate(() => window.__pp.sim.state.scrap);
-  await page.waitForTimeout(1100); // count-up finishes
-  await page.tap('.card-cta', { force: true });
-  await card.waitFor({ state: 'detached', timeout: 3000 }).catch(() => {});
-  const after = await page.evaluate(() => window.__pp.sim.state.scrap);
-  claimed = after - before;
+  // scrap is granted at load (claim is presentational — a reload before the
+  // tap must never forfeit hours of earnings)
+  const scrapNow = await page.evaluate(() => window.__pp.sim.state.scrap);
   const expected = Math.floor(3 * 3600 * save1.scrapRate * 0.5);
-  const tol = Math.max(4, expected * 0.05);
-  check('claim adds the advertised offline scrap', Math.abs(claimed - expected) <= tol,
-    `claimed=${claimed.toFixed(0)}, expected≈${expected}`);
+  const granted = scrapNow - save1.state.scrap;
+  const tol = Math.max(60, expected * 0.06); // live play keeps earning under the card
+  check('offline scrap granted on return', Math.abs(granted - expected) <= tol,
+    `granted≈${granted.toFixed(0)}, expected≈${expected}`);
+  await page.tap('.card-cta', { force: true });
+  const closed = await card.waitFor({ state: 'detached', timeout: 3000 }).then(() => true).catch(() => false);
+  check('claim closes the receipt card', closed);
 }
 
 // ---- 3. prestige: force eligibility, run the flow through the real UI

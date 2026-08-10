@@ -1,3 +1,4 @@
+import { BAND } from '../sim/defs';
 import type { Sim, SimEvent, UpgradeId } from '../sim/sim';
 
 export interface HudCallbacks {
@@ -23,6 +24,17 @@ export class Hud {
   private bandFillEl!: HTMLElement;
   private muteBtn!: HTMLButtonElement;
   private upgradeBtns = new Map<UpgradeId, HTMLButtonElement>();
+  // cached child refs + last written values: the HUD must not dirty the DOM
+  // on frames where nothing changed (mobile main-thread cost)
+  private scrapNumEl!: HTMLElement;
+  private costEls = new Map<UpgradeId, HTMLElement>();
+  private lvlEls = new Map<UpgradeId, HTMLElement>();
+  private lastCost = new Map<UpgradeId, string>();
+  private lastLvl = new Map<UpgradeId, string>();
+  private lastAfford = new Map<UpgradeId, boolean>();
+  private lastBattalion = '';
+  private lastBandFrac = -1;
+  private pulsePending = false;
   private cb: HudCallbacks;
   private displayedScrap = 0;
   muted = false;
@@ -43,6 +55,7 @@ export class Hud {
     const right = div('hud-top-right');
     this.scrapEl = div('chip scrap-chip');
     this.scrapEl.innerHTML = `<span class="scrap-ico"></span><span class="scrap-num">0</span>`;
+    this.scrapNumEl = this.scrapEl.querySelector('.scrap-num') as HTMLElement;
     this.muteBtn = document.createElement('button');
     this.muteBtn.className = 'icon-btn';
     this.muteBtn.innerHTML = speakerSvg(this.muted);
@@ -68,6 +81,7 @@ export class Hud {
       const b = document.createElement('button');
       b.className = 'buy-btn';
       b.innerHTML = `
+        <span class="gloss"></span>
         <span class="buy-name">${def.name}</span>
         <span class="buy-blurb">${def.blurb}</span>
         <span class="buy-price"><span class="scrap-ico small"></span><span class="cost">0</span></span>
@@ -77,6 +91,8 @@ export class Hud {
         this.cb.onBuy(def.id);
       });
       this.upgradeBtns.set(def.id, b);
+      this.costEls.set(def.id, b.querySelector('.cost') as HTMLElement);
+      this.lvlEls.set(def.id, b.querySelector('.buy-lvl') as HTMLElement);
       shelf.appendChild(b);
     }
     bottom.append(this.bandEl, shelf);
@@ -107,9 +123,9 @@ export class Hud {
   handleEvent(e: SimEvent, sim: Sim) {
     switch (e.type) {
       case 'collect': {
-        this.scrapEl.classList.remove('pulse');
-        void this.scrapEl.offsetWidth; // restart animation
-        this.scrapEl.classList.add('pulse');
+        // coalesced: a band snap can land 40+ collects in one frame — restart
+        // the pulse at most once per frame (in update), not per event
+        this.pulsePending = true;
         break;
       }
       case 'waveStart':
@@ -133,6 +149,13 @@ export class Hud {
   }
 
   update(sim: Sim, dt: number) {
+    if (this.pulsePending) {
+      this.pulsePending = false;
+      this.scrapEl.classList.remove('pulse');
+      void this.scrapEl.offsetWidth; // restart animation (once per frame max)
+      this.scrapEl.classList.add('pulse');
+    }
+
     const waveText = `WAVE ${sim.state.wave}`;
     if (this.waveEl.textContent !== waveText) this.waveEl.textContent = waveText;
     // count-up animation — never snap
@@ -141,28 +164,41 @@ export class Hud {
       const diff = target - this.displayedScrap;
       const step = Math.abs(diff) < 3 ? diff : Math.ceil(Math.abs(diff) * Math.min(1, dt * 8)) * Math.sign(diff);
       this.displayedScrap += step;
-      (this.scrapEl.querySelector('.scrap-num') as HTMLElement).textContent = fmt(this.displayedScrap);
+      this.scrapNumEl.textContent = fmt(this.displayedScrap);
     }
 
     for (const [id, b] of this.upgradeBtns) {
-      const cost = sim.upgradeCost(id);
-      const lvl = sim.state.upgrades[id];
-      (b.querySelector('.cost') as HTMLElement).textContent = fmt(cost);
-      (b.querySelector('.buy-lvl') as HTMLElement).textContent = `LV ${lvl + 1}`;
-      b.classList.toggle('disabled', !sim.canBuy(id));
+      const cost = fmt(sim.upgradeCost(id));
+      if (this.lastCost.get(id) !== cost) {
+        this.lastCost.set(id, cost);
+        this.costEls.get(id)!.textContent = cost;
+      }
+      const lvl = `LV ${sim.state.upgrades[id] + 1}`;
+      if (this.lastLvl.get(id) !== lvl) {
+        this.lastLvl.set(id, lvl);
+        this.lvlEls.get(id)!.textContent = lvl;
+      }
+      const afford = sim.canBuy(id);
+      if (this.lastAfford.get(id) !== afford) {
+        this.lastAfford.set(id, afford);
+        b.classList.toggle('disabled', !afford);
+      }
     }
 
     const mult = sim.battalionMult;
-    if (mult > 1.01) {
-      this.battalionEl.style.display = '';
-      this.battalionEl.textContent = `BATTALION ×${mult.toFixed(1)}`;
-    } else {
-      this.battalionEl.style.display = 'none';
+    const battalion = mult > 1.01 ? `BATTALION ×${mult.toFixed(1)}` : '';
+    if (battalion !== this.lastBattalion) {
+      this.lastBattalion = battalion;
+      this.battalionEl.style.display = battalion ? '' : 'none';
+      if (battalion) this.battalionEl.textContent = battalion;
     }
 
-    const frac = sim.bandCd <= 0 ? 1 : 1 - sim.bandCd / 6;
-    this.bandFillEl.style.transform = `scaleX(${frac})`;
-    this.bandEl.classList.toggle('ready', sim.bandCd <= 0);
+    const frac = sim.bandCd <= 0 ? 1 : 1 - sim.bandCd / BAND.cd;
+    if (Math.abs(frac - this.lastBandFrac) > 0.005) {
+      this.lastBandFrac = frac;
+      this.bandFillEl.style.transform = `scaleX(${frac})`;
+      this.bandEl.classList.toggle('ready', sim.bandCd <= 0);
+    }
   }
 }
 

@@ -85,7 +85,9 @@ function migrate(data: any): SaveData | null {
 }
 
 function num(v: unknown, fallback = 0): number {
-  return typeof v === 'number' && isFinite(v) ? v : fallback;
+  // clamped at 0: a corrupt negative (e.g. greenReserve) would flip the
+  // battalion multiplier and make rifles HEAL enemies — a permanent softlock
+  return typeof v === 'number' && isFinite(v) && v >= 0 ? v : fallback;
 }
 
 export function applySave(sim: Sim, data: SaveData) {
