@@ -103,6 +103,10 @@ export interface SimState {
   lifetimeScrap: number;
   battle: number; // current frontier battle
   medals: number;
+  /** Medals earned via the prestige formula only — the formula's baseline.
+   * Mission/migration medals are additive bonuses and must never be clawed
+   * back by `medalsOnPrestige` (review finding: they locked prestige out). */
+  prestigeMedals: number;
   medalsSpent: number;
   tree: Record<TreeNodeId, number>;
   program: Record<ClassId, boolean>;
@@ -133,6 +137,7 @@ export function defaultState(): SimState {
     lifetimeScrap: 0,
     battle: 1,
     medals: 0,
+    prestigeMedals: 0,
     medalsSpent: 0,
     tree: {
       fasterMolder: 0,
@@ -347,7 +352,7 @@ export class Sim {
     return Math.floor(PRESTIGE.coefficient * Math.sqrt(lifetime / PRESTIGE.S1));
   }
   medalsOnPrestige(): number {
-    return Math.max(0, this.medalsFor(this.state.lifetimeScrap) - this.state.medals);
+    return Math.max(0, this.medalsFor(this.state.lifetimeScrap) - this.state.prestigeMedals);
   }
   canPrestige() {
     return this.state.battle > PRESTIGE.minBattle && this.medalsOnPrestige() > 0;
@@ -369,7 +374,9 @@ export class Sim {
   }
 
   prestige() {
-    this.state.medals += this.medalsOnPrestige();
+    const gain = this.medalsOnPrestige();
+    this.state.medals += gain;
+    this.state.prestigeMedals += gain;
     this.state.scrap = 0;
     this.state.battle = 1;
     this.state.lossStreak = 0;
@@ -395,6 +402,9 @@ export class Sim {
     this.skirmishT = 1.5;
     this.bandCd = 0;
     this.setupMolderHp();
+    // reroll missions: old-run battle targets/rewards are meaningless now
+    this.state.missions = [];
+    this.ensureMissions();
   }
 
   // -------------------------------------------------- missions
@@ -402,15 +412,22 @@ export class Sim {
   private ensureMissions() {
     const s = this.state;
     while (s.missions.length < 3) {
-      s.missions.push(this.rollMission(s.missions.length));
+      s.missions.push(s.missions.length === 2 ? this.rollDaily() : this.rollMission(s.missions.length));
     }
-    // refresh the daily slot on a new day
+    // refresh the daily slot on a new day — the ONLY path that mints a daily
     const today = dayString();
     if (s.dailyDate !== today) {
       s.dailyDate = today;
       s.stats.winsToday = 0;
-      s.missions[2] = this.rollMission(2);
+      s.missions[2] = this.rollDaily();
     }
+  }
+
+  private rollDaily(): Mission {
+    const b = this.state.battle;
+    const seed = this.state.missionSeed++;
+    const rewardBase = BATTLE.rewardBase * Math.pow(BATTLE.rewardGrowth, b - 1);
+    return { id: `m${seed}`, kind: 'winCount', label: 'Win {n} battles today', target: 5, progress: 0, reward: Math.round(rewardBase * 8), medal: true, daily: true };
   }
 
   private rollMission(slot: number): Mission {
@@ -424,15 +441,11 @@ export class Sim {
         return { id: `m${seed}`, kind: 'stamp', label: 'Stamp {n} soldiers', target: 30 + b * 4, progress: 0, reward: Math.round(rewardBase * 1.5), medal: false, daily: false };
       return { id: `m${seed}`, kind: 'band', label: 'Snap {n} rubber bands', target: 3 + Math.floor(b / 6), progress: 0, reward: Math.round(rewardBase * 1.5), medal: false, daily: false };
     }
-    if (slot === 1) {
-      // medium (~1h)
-      const pick = seed % 2;
-      if (pick === 0)
-        return { id: `m${seed}`, kind: 'kill', label: 'Knock over {n} tans', target: 60 + b * 8, progress: 0, reward: Math.round(rewardBase * 4), medal: false, daily: false };
-      return { id: `m${seed}`, kind: 'reach', label: 'Win Battle {n}', target: b + 2, progress: 0, reward: Math.round(rewardBase * 6), medal: false, daily: false };
-    }
-    // daily
-    return { id: `m${seed}`, kind: 'winCount', label: 'Win {n} battles today', target: 5, progress: 0, reward: Math.round(rewardBase * 8), medal: true, daily: true };
+    // medium (~1h) — also the post-claim filler for the daily slot
+    const pick = seed % 2;
+    if (pick === 0)
+      return { id: `m${seed}`, kind: 'kill', label: 'Knock over {n} tans', target: 60 + b * 8, progress: 0, reward: Math.round(rewardBase * 4), medal: false, daily: false };
+    return { id: `m${seed}`, kind: 'reach', label: 'Win Battle {n}', target: b + 2, progress: 0, reward: Math.round(rewardBase * 6), medal: false, daily: false };
   }
 
   private missionProgress(kind: Mission['kind'], amount: number, absolute = false) {
@@ -452,8 +465,14 @@ export class Sim {
     if (!m || m.progress < m.target) return false;
     this.addScrap(m.reward);
     if (m.medal) this.state.medals += 1;
-    this.state.missions[slot] = this.rollMission(slot);
-    if (m.daily) this.state.dailyDate = dayString(); // one daily per day
+    // ONE daily per day: a claimed daily refills with a non-medal filler until
+    // ensureMissions rolls a fresh daily on the next calendar day
+    if (m.daily) {
+      this.state.dailyDate = dayString();
+      this.state.missions[slot] = this.rollMission(1);
+    } else {
+      this.state.missions[slot] = this.rollMission(slot);
+    }
     return true;
   }
 
@@ -463,8 +482,8 @@ export class Sim {
     const s = this.state;
     if (s.streakLast === today) return 0; // already counted today
     const gap = daysBetween(s.streakLast, today);
-    s.streakDay = gap <= 2 && s.streakDay > 0 ? Math.min(7, s.streakDay + 1) : 1;
-    if (s.streakDay === 1 && gap === 1 && s.streakLast !== '') s.streakDay = Math.min(7, 2);
+    // cycles after day 7 (a permanent 6×+boost daily would trivialize income)
+    s.streakDay = gap <= 2 && s.streakDay > 0 ? (s.streakDay % 7) + 1 : 1;
     s.streakLast = today;
     this.ensureMissions();
     return s.streakDay;

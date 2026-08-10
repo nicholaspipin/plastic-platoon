@@ -39,6 +39,24 @@ export function showWinToast(root: HTMLElement, battle: number, reward: number) 
   setTimeout(() => toast.remove(), 2400);
 }
 
+/** Commander battles are the drama beat — announce them. */
+export function showCommanderToast(root: HTMLElement, battle: number) {
+  const toast = div('win-toast commander-toast');
+  toast.innerHTML = `<span class="wt-skull">☠</span> BATTLE ${battle}: COMMANDER ASSAULT!`;
+  root.appendChild(toast);
+  setTimeout(() => toast.classList.add('closing'), 2400);
+  setTimeout(() => toast.remove(), 2700);
+}
+
+/** Overtime: the enemy is charging the Molder. */
+export function showSurgeToast(root: HTMLElement) {
+  const toast = div('win-toast commander-toast');
+  toast.innerHTML = `<span class="wt-skull">⚠</span> THEY'RE CHARGING THE MOLDER!`;
+  root.appendChild(toast);
+  setTimeout(() => toast.classList.add('closing'), 2400);
+  setTimeout(() => toast.remove(), 2700);
+}
+
 export function showLossCard(
   root: HTMLElement,
   info: { battle: number; remaining: number; reward: number; pity: number },

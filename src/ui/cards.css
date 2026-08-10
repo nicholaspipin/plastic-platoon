@@ -225,6 +225,15 @@
   color: var(--gold);
   font-size: 19px;
 }
+.commander-toast {
+  background: var(--red);
+  color: #fff;
+  box-shadow: 0 4px 0 var(--red-deep), 0 8px 18px rgba(0, 0, 0, 0.45);
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.3);
+}
+.commander-toast .wt-skull {
+  font-size: 18px;
+}
 .win-toast .wt-reward {
   color: var(--green);
   display: flex;

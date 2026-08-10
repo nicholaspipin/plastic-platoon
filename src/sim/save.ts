@@ -73,7 +73,9 @@ function migrateV1toV2(v1: any): any {
   state.lifetimeScrap = num(s.totalScrapEarned);
   // v1 wave count maps to battle frontier, softened (v2 battles are meatier)
   state.battle = Math.max(1, Math.min(30, Math.round(num(s.wave, 1) * 0.6)));
-  state.medals = num(s.medals) * 3; // v1 medals were scarcer; keep value felt
+  // v1 medals were scarcer; migrate ×3 as a pure BONUS (prestigeMedals stays 0
+  // so the next v2 prestige pays the full formula — player-friendly windfall)
+  state.medals = num(s.medals) * 3;
   state.molderRateLv = num(up.faster) * 2;
   state.moldSizeLv = num(up.bigger);
   state.classLv.rifle = num(up.rifles) * 2;
@@ -99,8 +101,35 @@ function sanitize(data: any): SaveData | null {
   for (const c of CLASS_ORDER) program[c] = s.program?.[c] !== false;
   const classLv = { ...d.classLv };
   for (const c of CLASS_ORDER) classLv[c] = int(s.classLv?.[c]);
+  // per-field mission sanitization: a corrupt reward once NaN'd the whole
+  // economy (NaN fails every `scrap < cost` guard open → free everything)
+  const KINDS = ['stamp', 'kill', 'band', 'reach', 'winCount'];
   const missions: Mission[] = Array.isArray(s.missions)
-    ? s.missions.filter((m: any) => m && typeof m.id === 'string' && isFinite(m.target)).slice(0, 3)
+    ? s.missions
+        .filter(
+          (m: any) =>
+            m &&
+            typeof m.id === 'string' &&
+            typeof m.label === 'string' &&
+            KINDS.includes(m.kind) &&
+            isFinite(m.target) &&
+            m.target > 0 &&
+            isFinite(m.reward) &&
+            m.reward >= 0
+        )
+        .slice(0, 3)
+        .map(
+          (m: any): Mission => ({
+            id: m.id,
+            kind: m.kind,
+            label: m.label,
+            target: Math.floor(m.target),
+            progress: num(m.progress),
+            reward: Math.floor(m.reward),
+            medal: !!m.medal,
+            daily: !!m.daily,
+          })
+        )
     : [];
 
   const state: SimState = {
@@ -108,6 +137,7 @@ function sanitize(data: any): SaveData | null {
     lifetimeScrap: num(s.lifetimeScrap),
     battle: Math.max(1, int(s.battle, 1)),
     medals: num(s.medals),
+    prestigeMedals: Math.min(num(s.prestigeMedals), num(s.medals)),
     medalsSpent: Math.min(num(s.medalsSpent), num(s.medals)),
     tree,
     program,

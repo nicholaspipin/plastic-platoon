@@ -25,6 +25,9 @@ export class Hud {
   private muteBtn!: HTMLButtonElement;
   private missionsEl!: HTMLElement;
   private missionChips: HTMLElement[] = [];
+  private molderHpEl!: HTMLElement;
+  private molderHpFill!: HTMLElement;
+  private lastMolderHp = -1;
   private attackBtn!: HTMLButtonElement;
   private bandEl!: HTMLElement;
   private bandFillEl!: HTMLElement;
@@ -79,6 +82,12 @@ export class Hud {
     this.battalionEl.style.display = 'none';
     this.boostEl = div('chip boost-chip');
     this.boostEl.style.display = 'none';
+
+    // molder HP: a toy nameplate + bar in the design language, pinned over the machine
+    this.molderHpEl = div('molder-hp');
+    this.molderHpEl.innerHTML = `<span class="mh-label">MOLDER</span><div class="mh-bar"><div class="mh-fill"></div></div>`;
+    this.molderHpFill = this.molderHpEl.querySelector('.mh-fill') as HTMLElement;
+    this.molderHpEl.style.display = 'none';
 
     // ---------- missions
     this.missionsEl = div('missions-row');
@@ -139,10 +148,12 @@ export class Hud {
     const badge = div('build-badge');
     badge.textContent = (import.meta.env.VITE_COMMIT_SHA ?? 'dev').slice(0, 7);
 
-    this.root.append(top, this.battalionEl, this.boostEl, this.missionsEl, dock, badge);
+    this.root.append(top, this.battalionEl, this.boostEl, this.molderHpEl, this.missionsEl, dock, badge);
   }
 
   showIntro(onStart: () => void) {
+    // one CTA per frame: the live HUD hides until the player deploys
+    this.root.classList.add('intro-open');
     const overlay = div('intro-overlay');
     const card = div('intro-card');
     card.innerHTML = `
@@ -155,6 +166,7 @@ export class Hud {
       'pointerdown',
       () => {
         overlay.classList.add('closing');
+        this.root.classList.remove('intro-open');
         setTimeout(() => overlay.remove(), 260);
         onStart();
       },
@@ -248,6 +260,21 @@ export class Hud {
       this.lastAttack = attackText;
       this.attackBtn.style.display = attackText ? '' : 'none';
       if (attackText) this.attackBtn.textContent = attackText;
+    }
+
+    // molder HP nameplate (in battle / while damaged)
+    const showHp = sim.mode === 'battle' || sim.molderHp < sim.molderHpMax - 0.01;
+    const hpFrac = showHp ? Math.max(0, sim.molderHp / sim.molderHpMax) : -1;
+    if (Math.abs(hpFrac - this.lastMolderHp) > 0.004) {
+      this.lastMolderHp = hpFrac;
+      this.molderHpEl.style.display = showHp ? '' : 'none';
+      if (showHp) {
+        // pinned above the machine: molderY fraction of the viewport minus its height
+        this.molderHpEl.style.top = `calc(${(62).toFixed(1)}vh - 208px)`;
+        this.molderHpFill.style.transform = `scaleX(${hpFrac})`;
+        this.molderHpEl.classList.toggle('hurt', hpFrac < 0.5);
+        this.molderHpEl.classList.toggle('critical', hpFrac < 0.25);
+      }
     }
 
     // band cooldown

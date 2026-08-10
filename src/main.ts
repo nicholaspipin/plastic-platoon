@@ -8,6 +8,8 @@ import { Hud } from './ui/hud';
 import {
   showOfflineCard,
   showWinToast,
+  showCommanderToast,
+  showSurgeToast,
   showLossCard,
   showUnlockCard,
   showStreakCard,
@@ -142,8 +144,10 @@ async function boot() {
     if (offline) grantOffline(offline.scrap, offline.seconds);
   }
 
-  // daily streak (after the offline card so they don't stack awkwardly)
-  if (!nosave && seenIntro) {
+  // daily streak (after the offline card so they don't stack awkwardly).
+  // Also re-checked periodically: a tab left open past midnight must roll over.
+  const checkNewDay = () => {
+    if (nosave || !seenIntro) return;
     const day = sim.advanceStreak();
     if (day > 0) {
       const reward = Math.round(
@@ -158,7 +162,9 @@ async function boot() {
         });
       }, 600);
     }
-  }
+  };
+  checkNewDay();
+  setInterval(checkNewDay, 60000);
 
   let lastZone = sim.zone;
   let last = performance.now();
@@ -198,6 +204,13 @@ async function boot() {
           break;
         case 'buy':
           if (navigator.vibrate) navigator.vibrate(8);
+          break;
+        case 'battleStart':
+          if (e.commander) showCommanderToast(uiEl, e.battle);
+          break;
+        case 'surge':
+          showSurgeToast(uiEl);
+          if (navigator.vibrate) navigator.vibrate([30, 60, 30]);
           break;
         case 'battleWon': {
           showWinToast(uiEl, e.battle, e.reward);

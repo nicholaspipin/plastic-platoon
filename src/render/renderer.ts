@@ -66,8 +66,6 @@ export class Renderer {
   private studs: Sprite[] = [];
   private celebration!: Sprite; // additive flash over the molder on upgrade
   private clsIndex!: Record<ClassId, number>;
-  private hpBarBack!: Sprite;
-  private hpBarFill!: Sprite;
   private molderFlashT = 0;
   private stampAnim = 0;
   private groundSprite: Sprite | null = null;
@@ -199,15 +197,6 @@ export class Renderer {
       this.unitLayer.addChild(s);
       this.studs.push(s);
     }
-    // molder HP bar (visible in battle / while damaged)
-    this.hpBarBack = new Sprite(Texture.WHITE);
-    this.hpBarBack.tint = 0x2a1a10;
-    this.hpBarBack.alpha = 0.85;
-    this.hpBarBack.visible = false;
-    this.hpBarFill = new Sprite(Texture.WHITE);
-    this.hpBarFill.tint = 0x67c23c;
-    this.hpBarFill.visible = false;
-    this.fxLayer.addChild(this.hpBarBack, this.hpBarFill);
 
     this.layout(sim);
     this.refreshStuds(sim);
@@ -521,24 +510,7 @@ export class Renderer {
       (Math.random() * 2 - 1) * mag * 0.7 + this.kickY
     );
 
-    // ---- molder HP bar + damage flash
-    const showBar = sim.mode === 'battle' || sim.molderHp < sim.molderHpMax - 0.01;
-    if (this.hpBarBack.visible !== showBar) {
-      this.hpBarBack.visible = showBar;
-      this.hpBarFill.visible = showBar;
-    }
-    if (showBar) {
-      const frac = Math.max(0, sim.molderHp / sim.molderHpMax);
-      const bx = LAYOUT.molderX - 52;
-      const by = this.h * LAYOUT.molderY - 196;
-      this.hpBarBack.position.set(bx, by);
-      this.hpBarBack.width = 104;
-      this.hpBarBack.height = 7;
-      this.hpBarFill.position.set(bx + 1.5, by + 1.5);
-      this.hpBarFill.width = Math.max(0.001, 101 * frac);
-      this.hpBarFill.height = 4;
-      this.hpBarFill.tint = frac > 0.5 ? 0x67c23c : frac > 0.25 ? 0xd9a62e : 0xe5484d;
-    }
+    // ---- molder damage flash (the HP bar itself lives in the DOM HUD)
     if (this.molderFlashT > 0) {
       this.molderFlashT -= dt;
       this.molderBase.tint = 0xff9a8a;

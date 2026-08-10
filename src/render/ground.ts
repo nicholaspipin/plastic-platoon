@@ -408,12 +408,12 @@ function underBed(c: CanvasRenderingContext2D, w: number, h: number, rng: Rng) {
   }
   c.globalAlpha = 1;
 
-  // heavy vignette — it's dark under here
+  // vignette — dark under here, but the top third must not be a dead void
   const v = c.createLinearGradient(0, 0, 0, h);
-  v.addColorStop(0, 'rgba(0,0,0,0.8)');
-  v.addColorStop(0.32, 'rgba(0,0,0,0.18)');
-  v.addColorStop(0.7, 'rgba(0,0,0,0.12)');
-  v.addColorStop(1, 'rgba(0,0,0,0.7)');
+  v.addColorStop(0, 'rgba(0,0,0,0.52)');
+  v.addColorStop(0.32, 'rgba(0,0,0,0.15)');
+  v.addColorStop(0.7, 'rgba(0,0,0,0.1)');
+  v.addColorStop(1, 'rgba(0,0,0,0.6)');
   c.fillStyle = v;
   c.fillRect(0, 0, w, h);
 }

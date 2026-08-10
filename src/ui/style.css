@@ -176,18 +176,34 @@ body {
   max-width: 66%;
 }
 .mission-chip {
-  background: rgba(43, 36, 24, 0.62);
-  color: #efe6d2;
+  /* kraft-tag sticker, not a debug pill */
+  background: var(--card);
+  color: var(--ink);
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.03em;
-  padding: 5px 10px;
-  border-radius: 10px;
+  padding: 5px 11px;
+  border-radius: 4px 11px 11px 4px;
   pointer-events: auto;
-  backdrop-filter: none;
+  box-shadow: 0 2px 0 var(--card-edge), 0 4px 8px rgba(0, 0, 0, 0.3);
+  transform: rotate(-0.8deg);
+  position: relative;
+  width: fit-content;
+}
+.mission-chip::before {
+  /* tag hole */
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgba(43, 36, 24, 0.25);
 }
 .mission-chip .mc-prog {
-  opacity: 0.7;
+  opacity: 0.55;
   font-variant-numeric: tabular-nums;
 }
 .mission-chip.done {
@@ -404,6 +420,61 @@ body {
   display: none;
 }
 
+/* molder HP nameplate */
+.molder-hp {
+  position: absolute;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--card);
+  padding: 4px 9px;
+  border-radius: 10px;
+  box-shadow: 0 2px 0 var(--card-edge), 0 4px 8px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+  transform: rotate(-1deg);
+}
+.molder-hp .mh-label {
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+  opacity: 0.6;
+}
+.molder-hp .mh-bar {
+  width: 68px;
+  height: 8px;
+  background: #d8d2c4;
+  border-radius: 999px;
+  overflow: hidden;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+.molder-hp .mh-fill {
+  height: 100%;
+  background: linear-gradient(180deg, #8be04a, #5cbf2a);
+  border-radius: 999px;
+  transform-origin: left;
+}
+.molder-hp.hurt .mh-fill {
+  background: linear-gradient(180deg, var(--gold-hi), var(--gold-lo));
+}
+.molder-hp.critical .mh-fill {
+  background: linear-gradient(180deg, #e35a3e, var(--red));
+}
+.molder-hp.critical {
+  animation: chip-pulse 0.5s ease-out infinite;
+}
+
+/* the intro owns the first frame — hide the live HUD behind it */
+#ui.intro-open .dock,
+#ui.intro-open .missions-row,
+#ui.intro-open .band-pill,
+#ui.intro-open .prestige-fab,
+#ui.intro-open .molder-hp,
+#ui.intro-open .battalion-chip {
+  display: none !important;
+}
+
 .band-pill {
   position: relative;
   align-self: center;
@@ -557,7 +628,7 @@ body {
   font-weight: 800;
   font-size: 14px;
   letter-spacing: 0.03em;
-  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.28);
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.45);
 }
 .buy-blurb {
   font-size: 10px;

@@ -149,7 +149,6 @@ export const BATTLE = {
   commanderBudgetFrac: 0.45,
   rewardBase: 14,
   rewardGrowth: 1.14,
-  firstWinMult: 3,
   dropFrac: 0.35, // fraction of reward dropped as pips during the fight
   lossFrac: 0.5, // loss still pays this fraction of the reward
   pityAfter: 2,
