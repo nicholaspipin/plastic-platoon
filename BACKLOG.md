@@ -2,6 +2,24 @@
 
 Directive 2 asked for a large toybox library. This pass ships the minimum useful set and keeps the rest visible here.
 
+## From the V2 review round (fresh-context reviewer, 2026-08-10)
+
+- **Class identity on the battlefield**: every green reads as the same
+  silhouette at 24px; classes exist only in the dock. Add per-class tells
+  (helmet band tint, prone MG pose, backpack shapes) readable at distance.
+- Enemy-remaining indicator per battle (wave tick or force bar in the header).
+- Skirmish pot-shots so the between-battle screen never reads as frozen.
+- Stage props / ambient lift for dark theaters' upper third.
+- Affordable-card pulse on the frame a cost is first met.
+
+## From DESIGN2's deferred list
+
+- Formation staging grid ("toy box lid") that expands with campaign progress.
+- Merge/rarity mold tiers (hard plastic → glow → chrome), parts/treasure sets.
+- Recon missions, arena vs saved formations, weekend mutator tournaments.
+- Multiplier gates the Molder's output marches through (the Mob Control beat).
+- Radioman (player-aimed mortar) and grenadier classes.
+
 ## Enemy Forces And Bosses
 
 - Jack-in-the-box ambush spawner with audible crank.
