@@ -58,7 +58,7 @@ export class Sfx {
         }
         break;
       case 'kill':
-        if (e.kind === 'soldier') {
+        if (e.kind === 'rifleman' || e.kind === 'bazooka' || e.kind === 'gunner') {
           if (t - this.lastTok > 0.045) {
             this.lastTok = t;
             if (t - this.lastKill > 1) this.killStep = 0;
@@ -93,6 +93,12 @@ export class Sfx {
         break;
       case 'waveStart':
         this.drumroll(t);
+        break;
+      case 'stepTik':
+        if (t - this.lastTok > 0.08) {
+          this.lastTok = t;
+          this.stepTik(t, e.count);
+        }
         break;
       default:
         break;
@@ -187,6 +193,13 @@ export class Sfx {
   /** Band ready again: soft click. */
   private click(t: number) {
     this.tone(t, 1250, 0.04, 0.1, 'triangle', 950);
+  }
+
+  /** Low-volume oval-base contact: an army of tiny rigid plastic steps. */
+  private stepTik(t: number, count: number) {
+    const mass = Math.min(1, count / 90);
+    this.tone(t, 620 + Math.random() * 80, 0.035, 0.025 + mass * 0.055, 'triangle', 360);
+    this.noise(t, 0.025, 1800 + Math.random() * 500, 1.2, 0.018 + mass * 0.035);
   }
 
   /** Upgrade: rising two-note toy chime. */

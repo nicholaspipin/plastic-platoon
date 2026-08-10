@@ -20,14 +20,14 @@ page.on('console', (m) => {
 });
 page.on('pageerror', (e) => errors.push(String(e)));
 
-async function shot(name, prep) {
+async function shot(prefix, name, prep) {
   await page.goto(`${base}?seed=7&nosave=1`, { waitUntil: 'networkidle' });
   await page.waitForFunction(() => window.__pp !== undefined);
   await page.waitForTimeout(400);
   if (prep) await prep();
   await page.waitForTimeout(150);
-  await page.screenshot({ path: `shots/${name}.png` });
-  console.log(`shots/${name}.png`);
+  await page.screenshot({ path: `shots/${prefix}-${name}.png` });
+  console.log(`shots/${prefix}-${name}.png`);
 }
 
 async function dismissIntro() {
@@ -38,77 +38,87 @@ async function dismissIntro() {
   }
 }
 
-// 1. initial load (intro card up)
-await shot('1-load', null);
+async function runSuite(prefix, viewport) {
+  await page.setViewportSize(viewport);
 
-// 2. first kill (~5s in)
-await shot('2-first-kill', async () => {
-  await dismissIntro();
-  await page.evaluate(() => window.__pp.ff(4));
-  // let real frames run so VFX/anim state is alive
-  await page.waitForTimeout(1600);
-});
+  // 1. initial load (intro card up)
+  await shot(prefix, '1-load', null);
 
-// 3. mid-battle (~60s simulated, upgrades bought like a real player;
-//    fast-forward until tans are actually on screen so the shot shows combat)
-await shot('3-mid-battle', async () => {
-  await dismissIntro();
-  await page.evaluate(() => {
-    const pp = window.__pp;
-    pp.ff(30);
-    pp.buy('faster');
-    pp.buy('bigger');
-    pp.ff(28);
-    let guard = 0;
-    while (
-      (pp.sim.countActive(1) < 8 ||
-        pp.sim.units.some((u) => u.active && u.faction === 1 && u.x > pp.sim.w * 0.92)) &&
-      guard++ < 240
-    ) {
-      pp.ff(0.25);
-    }
-    pp.ff(0.3); // the exchange of fire is starting — freeze it here
+  // 2. first kill (~5s in)
+  await shot(prefix, '2-first-kill', async () => {
+    await dismissIntro();
+    await page.evaluate(() => window.__pp.ff(4));
+    // let real frames run so waddle/hop frames and VFX are alive
+    await page.waitForTimeout(1600);
   });
-  await page.waitForTimeout(1600);
-});
 
-// 4. upgrade purchase moment
-await shot('4-upgrade', async () => {
-  await dismissIntro();
-  await page.evaluate(() => {
-    window.__pp.ff(20);
-    window.__pp.setScrap(500);
+  // 3. mid-battle (~60s simulated, upgrades bought like a real player)
+  await shot(prefix, '3-mid-battle', async () => {
+    await dismissIntro();
+    await page.evaluate(() => {
+      const pp = window.__pp;
+      pp.ff(24);
+      pp.setScrap(1200);
+      pp.buy('faster');
+      pp.buy('bigger');
+      pp.buy('rifles');
+      pp.buy('scouts');
+      pp.ff(34);
+      let guard = 0;
+      while (
+        (pp.sim.countActive(0) < 60 ||
+          pp.sim.countActive(1) < 8 ||
+          pp.sim.units.some((u) => u.active && u.faction === 1 && u.x > pp.sim.w * 0.92)) &&
+        guard++ < 260
+      ) {
+        pp.ff(0.25);
+      }
+      pp.ff(0.3);
+    });
+    await page.waitForTimeout(1600);
   });
-  await page.waitForTimeout(300);
-  // force: the affordable-pulse animation means the button is never "stable"
-  await page.tap('.buy-btn', { force: true });
-  await page.waitForTimeout(220);
-});
 
-// 5. zone 2: Under the Bed
-await shot('5-zone2', async () => {
-  await dismissIntro();
-  await page.evaluate(() => {
-    const pp = window.__pp;
-    pp.setScrap(3000);
-    pp.buy('faster');
-    pp.buy('faster');
-    pp.buy('bigger');
-    pp.buy('bigger');
-    pp.sim.state.wave = 15;
-    let guard = 0;
-    while (pp.sim.state.zone < 1 && guard++ < 90) pp.ff(1);
-    guard = 0;
-    while (
-      (pp.sim.countActive(1) < 6 ||
-        pp.sim.units.some((u) => u.active && u.faction === 1 && u.x > pp.sim.w * 0.92)) &&
-      guard++ < 240
-    ) {
-      pp.ff(0.25);
-    }
+  // 4. upgrade purchase moment
+  await shot(prefix, '4-upgrade', async () => {
+    await dismissIntro();
+    await page.evaluate(() => {
+      window.__pp.ff(20);
+      window.__pp.setScrap(500);
+    });
+    await page.waitForTimeout(300);
+    // force: the affordable-pulse animation means the button is never "stable"
+    await page.tap('.buy-btn', { force: true });
+    await page.waitForTimeout(220);
   });
-  await page.waitForTimeout(1600);
-});
+
+  // 5. zone 2: Under the Bed
+  await shot(prefix, '5-zone2', async () => {
+    await dismissIntro();
+    await page.evaluate(() => {
+      const pp = window.__pp;
+      pp.setScrap(3000);
+      pp.buy('faster');
+      pp.buy('faster');
+      pp.buy('bigger');
+      pp.buy('bigger');
+      pp.sim.state.wave = 15;
+      let guard = 0;
+      while (pp.sim.state.zone < 1 && guard++ < 90) pp.ff(1);
+      guard = 0;
+      while (
+        (pp.sim.countActive(1) < 6 ||
+          pp.sim.units.some((u) => u.active && u.faction === 1 && u.x > pp.sim.w * 0.92)) &&
+        guard++ < 240
+      ) {
+        pp.ff(0.25);
+      }
+    });
+    await page.waitForTimeout(1600);
+  });
+}
+
+await runSuite('390x844', { width: 390, height: 844 });
+await runSuite('430x932', { width: 430, height: 932 });
 
 if (errors.length) {
   console.error('CONSOLE ERRORS:');

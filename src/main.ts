@@ -60,22 +60,61 @@ let hitStop = 0; // seconds of sim freeze (render keeps running)
 async function boot() {
   await renderer.init(gameEl, sim);
 
-  // input: tap anywhere on the battlefield = rubber band snap.
-  // ~80ms anticipation between the tap and the snap itself (juice table §4.4).
+  // input: tap = rubber band snap; horizontal hold-drag = set advance/hold line
+  // Taps keep the 80ms anticipation delay from the juice pass.
   let bandPending = false;
-  renderer.app.canvas.addEventListener('pointerdown', (e: PointerEvent) => {
+  let gesture:
+    | {
+        id: number;
+        sx: number;
+        sy: number;
+        x: number;
+        y: number;
+        drag: boolean;
+      }
+    | null = null;
+  const point = (e: PointerEvent) => {
     sfx.unlock();
-    if (bandPending || sim.bandCd > 0) return;
-    bandPending = true;
     const rect = renderer.app.canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    renderer.anticipateBand(x, y);
-    setTimeout(() => {
-      bandPending = false;
-      sim.tryBand(x, y);
-      if (navigator.vibrate) navigator.vibrate(12);
-    }, 80);
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  };
+  renderer.app.canvas.addEventListener('pointerdown', (e: PointerEvent) => {
+    const p = point(e);
+    gesture = { id: e.pointerId, sx: p.x, sy: p.y, x: p.x, y: p.y, drag: false };
+    renderer.app.canvas.setPointerCapture(e.pointerId);
+  });
+  renderer.app.canvas.addEventListener('pointermove', (e: PointerEvent) => {
+    if (!gesture || e.pointerId !== gesture.id) return;
+    const p = point(e);
+    gesture.x = p.x;
+    gesture.y = p.y;
+    const dx = p.x - gesture.sx;
+    const dy = p.y - gesture.sy;
+    if (Math.abs(dx) > 26 && Math.abs(dx) > Math.abs(dy) * 1.35) {
+      gesture.drag = true;
+      sim.setCommandLine(p.x);
+    }
+  });
+  renderer.app.canvas.addEventListener('pointerup', (e: PointerEvent) => {
+    if (!gesture || e.pointerId !== gesture.id) return;
+    const g = gesture;
+    gesture = null;
+    if (g.drag) {
+      sim.setCommandLine(g.x);
+      if (navigator.vibrate) navigator.vibrate(5);
+    } else {
+      if (bandPending || sim.bandCd > 0) return;
+      bandPending = true;
+      renderer.anticipateBand(g.x, g.y);
+      setTimeout(() => {
+        bandPending = false;
+        sim.tryBand(g.x, g.y);
+        if (navigator.vibrate) navigator.vibrate(12);
+      }, 80);
+    }
+  });
+  renderer.app.canvas.addEventListener('pointercancel', () => {
+    gesture = null;
   });
 
   let resizeT = 0;
@@ -135,7 +174,7 @@ async function boot() {
       sfx.handleEvent(e);
       // hit-stop freezes the sim, never render or audio; reduced-motion
       // users get the renderer's flash effects instead
-      if (e.type === 'kill' && e.kind !== 'soldier') {
+      if (e.type === 'kill' && e.kind !== 'rifleman' && e.kind !== 'bazooka' && e.kind !== 'gunner') {
         if (!renderer.reducedMotion) hitStop = Math.max(hitStop, 0.07);
         if (navigator.vibrate) navigator.vibrate(25);
       } else if (e.type === 'buy' && navigator.vibrate) {
@@ -214,6 +253,7 @@ declare global {
       ff: (seconds: number) => void;
       setScrap: (n: number) => void;
       buy: (id: 'faster' | 'bigger' | 'rifles' | 'scouts') => boolean;
+      setLine: (x: number) => void;
       resetSave: () => void;
       saveNow: () => void;
       hitStop: (ms: number) => void;
@@ -237,6 +277,7 @@ window.__pp = {
     sim.state.scrap = n;
   },
   buy: (id) => sim.buy(id),
+  setLine: (x) => sim.setCommandLine(x),
   resetSave: () => {
     clearSave();
     location.reload();

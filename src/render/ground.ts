@@ -116,7 +116,7 @@ function carpet(c: CanvasRenderingContext2D, w: number, h: number, rng: Rng) {
   pencil(c, w * 0.02, h * 0.135, w * 0.9);
   legoBrick(c, w * 0.66, h * 0.225, w * 0.24, '#c33a31', '#8f1f18', '#e05a50');
   legoBrick(c, w * 0.84, h * 0.185, w * 0.19, '#2a63b8', '#1a4187', '#4a86d8');
-  coins(c, w * 0.76, h * 0.775, w, rng);
+  midgroundProps(c, w, h, rng);
 
   // vignette: 12% corner darkening + top/bottom press
   const v = c.createLinearGradient(0, 0, 0, h);
@@ -272,57 +272,157 @@ function legoBrick(
   c.fill();
 }
 
-/** A few dropped pennies/quarters, giant relative to the soldiers. */
-function coins(c: CanvasRenderingContext2D, x: number, y: number, w: number, rng: Rng) {
-  const defs = [
-    { dx: 0, dy: 0, r: w * 0.085, main: '#c9962e', edge: '#8f6716', lite: '#e8bc55' },
-    { dx: w * 0.1, dy: w * 0.045, r: w * 0.07, main: '#b0733a', edge: '#7c4c20', lite: '#d29558' },
-    { dx: -w * 0.04, dy: w * 0.075, r: w * 0.06, main: '#c9962e', edge: '#8f6716', lite: '#e8bc55' },
-  ];
-  for (const d of defs) {
-    const cx = x + d.dx;
-    const cy = y + d.dy;
-    const ry = d.r * 0.42;
-    c.fillStyle = 'rgba(30,10,2,0.3)';
+function midgroundProps(c: CanvasRenderingContext2D, w: number, h: number, rng: Rng) {
+  dice(c, w * 0.76, h * 0.54, w * 0.13);
+  domino(c, w * 0.62, h * 0.66, w * 0.2, -0.28);
+  domino(c, w * 0.68, h * 0.69, w * 0.2, -0.12);
+  gluePuddle(c, w * 0.58, h * 0.66, w * 0.13);
+  bottleCap(c, w * 0.83, h * 0.69, w * 0.08);
+  toyCrate(c, w * 0.25, h * 0.75, w * 0.15);
+  jack(c, w * 0.18, h * 0.52, w * 0.045, rng);
+}
+
+function dice(c: CanvasRenderingContext2D, x: number, y: number, s: number) {
+  c.fillStyle = 'rgba(30,10,2,0.32)';
+  c.beginPath();
+  c.ellipse(x + s * 0.45, y + s * 0.72, s * 0.58, s * 0.2, 0, 0, Math.PI * 2);
+  c.fill();
+  c.fillStyle = '#fff4d8';
+  c.beginPath();
+  c.roundRect(x, y, s, s * 0.82, s * 0.12);
+  c.fill();
+  c.fillStyle = '#d7c5a0';
+  c.beginPath();
+  c.roundRect(x, y + s * 0.58, s, s * 0.24, s * 0.08);
+  c.fill();
+  c.fillStyle = '#2b2418';
+  for (const [px, py] of [
+    [0.28, 0.24],
+    [0.72, 0.24],
+    [0.5, 0.42],
+    [0.28, 0.6],
+    [0.72, 0.6],
+  ] as const) {
     c.beginPath();
-    c.ellipse(cx + d.r * 0.05, cy + ry * 0.5, d.r * 1.04, ry, 0, 0, Math.PI * 2);
+    c.ellipse(x + s * px, y + s * py, s * 0.055, s * 0.045, 0, 0, Math.PI * 2);
     c.fill();
-    c.fillStyle = d.edge;
-    c.beginPath();
-    c.ellipse(cx, cy + ry * 0.22, d.r, ry, 0, 0, Math.PI * 2);
-    c.fill();
-    c.fillStyle = d.main;
-    c.beginPath();
-    c.ellipse(cx, cy, d.r, ry, 0, 0, Math.PI * 2);
-    c.fill();
-    c.fillStyle = d.lite;
-    c.beginPath();
-    c.ellipse(cx - d.r * 0.15, cy - ry * 0.18, d.r * 0.72, ry * 0.62, 0, 0, Math.PI * 2);
-    c.fill();
-    // embossed profile suggestion
-    c.fillStyle = d.main;
-    c.beginPath();
-    c.ellipse(cx - d.r * 0.08, cy - ry * 0.08, d.r * 0.4, ry * 0.4, 0, 0, Math.PI * 2);
-    c.fill();
-    // reeded edge ticks
-    c.strokeStyle = d.edge;
-    c.lineWidth = Math.max(1, d.r * 0.04);
-    for (let i = 0; i < 9; i++) {
-      const a = Math.PI * (0.15 + (i / 9) * 0.7);
-      const ex = cx + Math.cos(a) * d.r;
-      const ey = cy + ry * 0.22 + Math.sin(a) * ry;
-      c.beginPath();
-      c.moveTo(ex, ey);
-      c.lineTo(ex, ey - ry * 0.2);
-      c.stroke();
-    }
-    // hard spec
-    c.fillStyle = 'rgba(255,250,235,0.8)';
-    c.beginPath();
-    c.ellipse(cx - d.r * 0.35, cy - ry * 0.35, d.r * 0.16, ry * 0.14, -0.4, 0, Math.PI * 2);
-    c.fill();
-    void rng;
   }
+}
+
+function domino(c: CanvasRenderingContext2D, x: number, y: number, s: number, r: number) {
+  c.save();
+  c.translate(x, y);
+  c.rotate(r);
+  c.fillStyle = 'rgba(30,10,2,0.28)';
+  c.beginPath();
+  c.ellipse(s * 0.5, s * 0.24, s * 0.55, s * 0.16, 0, 0, Math.PI * 2);
+  c.fill();
+  c.fillStyle = '#f4ead6';
+  c.beginPath();
+  c.roundRect(0, 0, s, s * 0.42, s * 0.08);
+  c.fill();
+  c.strokeStyle = '#8a7a5c';
+  c.lineWidth = 2;
+  c.beginPath();
+  c.moveTo(s * 0.5, s * 0.06);
+  c.lineTo(s * 0.5, s * 0.36);
+  c.stroke();
+  c.fillStyle = '#2b2418';
+  for (const [px, py] of [
+    [0.22, 0.16],
+    [0.32, 0.29],
+    [0.68, 0.16],
+    [0.78, 0.29],
+  ] as const) {
+    c.beginPath();
+    c.arc(s * px, s * py, s * 0.035, 0, Math.PI * 2);
+    c.fill();
+  }
+  c.restore();
+}
+
+function gluePuddle(c: CanvasRenderingContext2D, x: number, y: number, s: number) {
+  c.fillStyle = 'rgba(180,220,210,0.38)';
+  c.beginPath();
+  c.ellipse(x, y, s * 0.72, s * 0.38, -0.2, 0, Math.PI * 2);
+  c.fill();
+  c.fillStyle = 'rgba(245,255,250,0.55)';
+  c.beginPath();
+  c.ellipse(x - s * 0.2, y - s * 0.1, s * 0.25, s * 0.08, -0.4, 0, Math.PI * 2);
+  c.fill();
+}
+
+function bottleCap(c: CanvasRenderingContext2D, x: number, y: number, r: number) {
+  c.fillStyle = 'rgba(30,10,2,0.3)';
+  c.beginPath();
+  c.ellipse(x, y + r * 0.3, r * 1.2, r * 0.42, 0, 0, Math.PI * 2);
+  c.fill();
+  c.fillStyle = '#2a63b8';
+  c.beginPath();
+  c.ellipse(x, y, r, r * 0.42, 0, 0, Math.PI * 2);
+  c.fill();
+  c.strokeStyle = '#1a4187';
+  c.lineWidth = 2;
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2;
+    c.beginPath();
+    c.moveTo(x + Math.cos(a) * r * 0.84, y + Math.sin(a) * r * 0.32);
+    c.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r * 0.42);
+    c.stroke();
+  }
+  c.fillStyle = 'rgba(255,255,255,0.55)';
+  c.beginPath();
+  c.ellipse(x - r * 0.25, y - r * 0.08, r * 0.32, r * 0.08, -0.2, 0, Math.PI * 2);
+  c.fill();
+}
+
+function toyCrate(c: CanvasRenderingContext2D, x: number, y: number, s: number) {
+  c.fillStyle = 'rgba(30,10,2,0.28)';
+  c.beginPath();
+  c.ellipse(x + s * 0.5, y + s * 0.75, s * 0.58, s * 0.18, 0, 0, Math.PI * 2);
+  c.fill();
+  c.fillStyle = '#d9a62e';
+  c.beginPath();
+  c.roundRect(x, y, s, s * 0.62, s * 0.08);
+  c.fill();
+  c.fillStyle = '#9a7014';
+  c.fillRect(x, y + s * 0.46, s, s * 0.16);
+  c.fillRect(x + s * 0.42, y, s * 0.14, s * 0.62);
+  c.strokeStyle = '#f6e3ae';
+  c.lineWidth = 2;
+  c.beginPath();
+  c.moveTo(x + s * 0.08, y + s * 0.1);
+  c.lineTo(x + s * 0.92, y + s * 0.1);
+  c.stroke();
+}
+
+function jack(c: CanvasRenderingContext2D, x: number, y: number, s: number, rng: Rng) {
+  c.save();
+  c.translate(x, y);
+  c.rotate(-0.4 + rng() * 0.2);
+  c.strokeStyle = '#c6ccd6';
+  c.lineWidth = 3;
+  c.lineCap = 'round';
+  c.beginPath();
+  c.moveTo(-s, 0);
+  c.lineTo(s, 0);
+  c.moveTo(0, -s);
+  c.lineTo(0, s);
+  c.moveTo(-s * 0.7, -s * 0.7);
+  c.lineTo(s * 0.7, s * 0.7);
+  c.stroke();
+  c.fillStyle = '#f4f7fc';
+  for (const [px, py] of [
+    [-s, 0],
+    [s, 0],
+    [0, -s],
+    [0, s],
+  ] as const) {
+    c.beginPath();
+    c.arc(px, py, s * 0.18, 0, Math.PI * 2);
+    c.fill();
+  }
+  c.restore();
 }
 
 // ---------------------------------------------------------------- zone 1: under the bed

@@ -62,6 +62,25 @@ audio/
 
 **Final:** perf audit subagent + code review subagent, DECISIONS/ART_NOTES/PLAN committed, live URL verified.
 
+## 2.5 Directive 2 — Army Feel Pass
+
+Owner feedback supersedes conflicting earlier details: the game must feel like commanding a large plastic army, not scattered figures on a carpet.
+
+**D2-M1 ships now**
+- Rigid-toy locomotion: remove leg-cycle read in runtime motion; use base-pivot waddles, scout hops, robot key shuffle, and death wobble-settle.
+- Army scale: tune early economy and caps for 60-150 rendered figures in mid-game, with reserve battalion multiplier above the render cap.
+- Formation system: greens auto-slot into ranks/columns behind an advance line; every 20 soldiers forms a named platoon with banner identity.
+- Territory push: add a scrolling-front meter, checkpoint landmarks, and a hold/advance chalk line set by horizontal hold-drag. Tap remains rubber-band snap.
+- Mobile layout: replace the two-card shelf feel with compact bottom price-tag tray buttons, LV badges, affordability dots, next-unlock tease, daily/supply/vault hooks.
+- Toybox content: add three hazards, two new enemy/event types, one neutral chaos event, and at least three functional props in the battlefield.
+- Progression: first 15-minute beat sheet and tuning constants move to `BALANCE.md` / `src/sim/balance.ts`; deferred content moves to `BACKLOG.md`.
+
+**D2 gates**
+- Portrait screenshots at 390x844 and 430x932.
+- Three screenshot-review passes against Art Checklist + D2 movement/baseplate + current screenshot fixes.
+- Perf probe with 150+ units and formation logic.
+- Push to `main` and verify live URL.
+
 ## 3. Risks
 
 | Risk | Mitigation |

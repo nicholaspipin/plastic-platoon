@@ -49,6 +49,8 @@ export class Renderer {
 
   private unitShadows: Sprite[] = [];
   private unitBodies: Sprite[] = [];
+  private unitKeys: Sprite[] = [];
+  private formationPlates: Sprite[] = [];
   private spawnT: Float32Array = new Float32Array(0); // per-unit hop anim
   private lean: Float32Array = new Float32Array(0); // per-unit static toy lean
   private hitT: Float32Array = new Float32Array(0); // per-unit flinch anim
@@ -63,6 +65,9 @@ export class Renderer {
   private piston!: Sprite;
   private pellets!: Sprite;
   private studs: Sprite[] = [];
+  private banners: Sprite[] = [];
+  private commandLine!: Sprite;
+  private molderGlow!: Sprite;
   private celebration!: Sprite; // additive flash over the molder on upgrade
   private stampAnim = 0;
   private groundSprite: Sprite | null = null;
@@ -129,6 +134,12 @@ export class Renderer {
       b.visible = false;
       this.unitLayer.addChild(b);
       this.unitBodies.push(b);
+
+      const key = new Sprite(this.atlas.tex.robot_key);
+      key.anchor.set(0.5);
+      key.visible = false;
+      this.unitLayer.addChild(key);
+      this.unitKeys.push(key);
     }
 
     for (let i = 0; i < sim.pips.length; i++) {
@@ -139,12 +150,21 @@ export class Renderer {
       this.pipSprites.push(p);
     }
 
+    for (let i = 0; i < 8; i++) {
+      const plate = new Sprite(this.atlas.tex.formation_plate);
+      plate.anchor.set(0.5);
+      plate.alpha = 0.54;
+      plate.visible = false;
+      this.shadowLayer.addChild(plate);
+      this.formationPlates.push(plate);
+    }
+
     for (let i = 0; i < 48; i++) {
       const t = new Sprite(this.atlas.tex.tracer);
       t.anchor.set(0, 0.5);
       t.visible = false;
       this.fxLayer.addChild(t);
-      this.tracers.push({ spr: t, t: 0, life: 0.09 });
+      this.tracers.push({ spr: t, t: 0, life: 0.16 });
     }
     for (let i = 0; i < 24; i++) {
       const m = new Sprite(this.atlas.tex.muzzle);
@@ -179,7 +199,15 @@ export class Renderer {
     this.celebration.anchor.set(0.5);
     this.celebration.blendMode = 'add';
     this.celebration.visible = false;
-    this.unitLayer.addChild(this.molderBase, this.piston, this.pellets, this.celebration);
+    this.molderGlow = new Sprite(this.atlas.tex.spark);
+    this.molderGlow.anchor.set(0.5);
+    this.molderGlow.blendMode = 'add';
+    this.molderGlow.alpha = 0.2;
+    this.commandLine = new Sprite(this.atlas.tex.chalk_line);
+    this.commandLine.anchor.set(0.5);
+    this.commandLine.alpha = 0.58;
+    this.unitLayer.addChild(this.molderGlow, this.molderBase, this.piston, this.pellets, this.celebration);
+    this.shadowLayer.addChild(this.commandLine);
     // gold studs on the plinth mark purchased upgrade levels
     for (let i = 0; i < 8; i++) {
       const s = new Sprite(this.atlas.tex.stud);
@@ -187,6 +215,14 @@ export class Renderer {
       s.visible = false;
       this.unitLayer.addChild(s);
       this.studs.push(s);
+    }
+    for (let i = 0; i < 8; i++) {
+      const b = new Sprite(this.atlas.tex.banner);
+      b.anchor.set(0.2, 1);
+      b.scale.set(0.72);
+      b.visible = false;
+      this.unitLayer.addChild(b);
+      this.banners.push(b);
     }
 
     this.layout(sim);
@@ -215,20 +251,30 @@ export class Renderer {
       this.rebakeGround(sim.state.zone);
     }
     const my = this.h * LAYOUT.molderY;
+    const heroScale = 1.16;
     this.molderBase.position.set(LAYOUT.molderX, my);
-    // zIndex sits above units at the machine's visual midline, but below units
-    // standing on the output tray — so nothing ever clips through the platens
-    this.molderBase.zIndex = my - 42;
+    this.molderBase.scale.set(heroScale);
+    // Directive 2 hero read: the Molder stays in front of the supply column,
+    // so it reads as the machine stamping the army instead of background art.
+    this.molderBase.zIndex = my + 82;
     this.piston.position.set(LAYOUT.molderX + 14, this.molderTop + 30);
-    this.piston.zIndex = my - 41;
+    this.piston.scale.set(heroScale);
+    this.piston.zIndex = my + 83;
     this.pellets.position.set(LAYOUT.molderX + 10, this.molderTop + 4);
-    this.pellets.zIndex = my - 40;
+    this.pellets.scale.set(heroScale);
+    this.pellets.zIndex = my + 84;
+    this.molderGlow.position.set(LAYOUT.molderX, my - 88);
+    this.molderGlow.scale.set(32);
+    this.molderGlow.zIndex = my + 78;
     this.celebration.position.set(LAYOUT.molderX, my - 90);
-    this.celebration.zIndex = my - 39;
+    this.celebration.zIndex = my + 85;
     for (let i = 0; i < this.studs.length; i++) {
       this.studs[i].position.set(LAYOUT.molderX - 52 + i * 14.5, my - 22);
-      this.studs[i].zIndex = my - 39;
+      this.studs[i].zIndex = my + 86;
     }
+    this.commandLine.position.set(sim.commandLineX, this.h * (LAYOUT.bandTop + LAYOUT.bandBot) * 0.5);
+    this.commandLine.height = this.h * (LAYOUT.bandBot - LAYOUT.bandTop) + 28;
+    this.commandLine.width = 18;
   }
 
   refreshStuds(sim: Sim) {
@@ -350,9 +396,10 @@ export class Renderer {
               : e.faction === 0
                 ? 0x82955c
                 : 0xecd7a8;
-        const count = e.kind === 'soldier' ? 7 + ((Math.random() * 5) | 0) : 26;
-        this.spawnShards(e.x, e.y - 16, count, tint, e.kind === 'soldier' ? 1 : 1.6);
-        if (e.kind !== 'soldier') {
+        const small = e.kind === 'rifleman' || e.kind === 'bazooka' || e.kind === 'gunner';
+        const count = small ? 7 + ((Math.random() * 5) | 0) : 26;
+        this.spawnShards(e.x, e.y - 16, count, tint, small ? 1 : 1.6);
+        if (!small) {
           this.addTrauma(0.5);
           // reduced-motion users get a flash in place of hit-stop + shake
           if (this.reducedMotion) this.spawnFlash(e.x, e.y - 20, 4.5);
@@ -376,6 +423,28 @@ export class Renderer {
         this.addTrauma(0.2);
         break;
       }
+      case 'commandLine':
+        this.commandLine.x = e.x;
+        this.spawnRing(e.x, this.h * 0.55);
+        break;
+      case 'checkpoint':
+        this.spawnShards(this.w * 0.76, this.h * 0.48, 30, 0xd9a62e, 1.7);
+        this.addTrauma(0.38);
+        break;
+      case 'platoon':
+        this.spawnShards(e.x, e.y, 14, 0xd9a62e, 1.1);
+        break;
+      case 'hazard':
+        if (e.kind === 'cat') {
+          this.spawnShards(e.x, e.y, 38, 0xc9a06a, 1.9);
+          this.addTrauma(0.62);
+        } else if (e.kind === 'marble') {
+          this.spawnShards(this.w - 18, e.y, 22, 0x9aa1ac, 1.5);
+          this.addTrauma(0.28);
+        } else if (e.kind === 'paper') {
+          this.spawnFlash(e.x, e.y);
+        }
+        break;
       default:
         break;
     }
@@ -492,7 +561,9 @@ export class Renderer {
     this.piston.y = this.molderTop + 30 + slam * 34 + (1 - slam) * breathe;
     // body squash on impact
     const squash = a > 0.7 ? (a - 0.7) / 0.3 : 0;
-    this.molderBase.scale.set(1 + squash * 0.05, 1 - squash * 0.06);
+    const heroScale = 1.16;
+    this.molderBase.scale.set(heroScale * (1 + squash * 0.05), heroScale * (1 - squash * 0.06));
+    this.molderGlow.alpha = 0.16 + Math.sin(this.idleT * 1.4) * 0.035;
     // pellet shimmer
     this.pellets.alpha = 0.5 + Math.sin(this.idleT * 2.7) * 0.3;
     this.pellets.y = this.molderTop + 4 + Math.sin(this.idleT * 1.9 + 1) * 1.2;
@@ -503,15 +574,18 @@ export class Renderer {
       const u = sim.units[i];
       const body = this.unitBodies[i];
       const sh = this.unitShadows[i];
+      const key = this.unitKeys[i];
       if (!u.active) {
         if (body.visible) {
           body.visible = false;
           sh.visible = false;
+          key.visible = false;
         }
         continue;
       }
       body.visible = true;
       sh.visible = true;
+      key.visible = u.kind === 'robot';
 
       const x = u.px + (u.x - u.px) * alpha;
       const y = u.py + (u.y - u.py) * alpha;
@@ -520,11 +594,13 @@ export class Renderer {
       let tex: Texture;
       if (u.kind === 'robot') tex = this.atlas.tex.robot;
       else if (u.kind === 'dino') tex = this.atlas.tex.dino;
+      else if (u.kind === 'rcCar') tex = this.atlas.tex.rc_car;
+      else if (u.kind === 'paperPlane') tex = this.atlas.tex.paper_plane;
+      else if (u.faction === 0 && u.kind === 'bazooka') tex = this.atlas.tex.green_bazooka;
+      else if (u.faction === 0 && u.kind === 'gunner') tex = this.atlas.tex.green_gunner;
       else if (u.state === 'fight') tex = this.fireTex[u.faction];
       else {
-        // march on twos: 2-frame cycle stepped (~12fps handmade feel)
-        const frame = Math.floor(t * 6 + u.phase * 2) % 2;
-        tex = this.marchTex[u.faction][frame];
+        tex = this.marchTex[u.faction][0];
       }
       if (body.texture !== tex) body.texture = tex;
       // zone skin: under the bed, the invaders are dusty gray-blue
@@ -536,6 +612,7 @@ export class Renderer {
       let alphaV = 1;
       let sx = 1;
       let sy = 1;
+      let ox = 0;
 
       // spawn hop: pop out of the mold with a landing squash
       if (this.spawnT[i] < 0.42) {
@@ -561,22 +638,45 @@ export class Renderer {
       }
 
       if (u.state === 'dying') {
-        const k = Math.min(1, u.deathT / 0.32);
+        const k = Math.min(1, u.deathT / 0.36);
         const e = 1 - (1 - k) * (1 - k); // ease-out tip
         rot = u.tipDir * e * (Math.PI / 2) * 0.94;
-        if (u.deathT > 0.24) alphaV = Math.max(0, 1 - (u.deathT - 0.24) / 0.36);
+        if (u.deathT > 0.34 && u.deathT < 0.72) {
+          rot += Math.sin((u.deathT - 0.34) * 24 + u.phase) * 0.12 * (1 - (u.deathT - 0.34) / 0.38);
+        }
+        if (u.deathT > 0.66) alphaV = Math.max(0, 1 - (u.deathT - 0.66) / 0.28);
       } else if (u.state === 'march') {
-        // stiff plastic waddle, stepped like stop-motion
-        const step = Math.floor(t * 6 + u.phase * 2) % 2;
-        rot += (step === 0 ? 1 : -1) * 0.05;
-        bob += step === 0 ? 0 : -1.5;
+        if (u.moveMode === 'hop') {
+          const ph = (t * 2.8 + u.phase) % 1;
+          const lift = Math.sin(ph * Math.PI);
+          bob -= lift * 7.5;
+          rot += (ph < 0.5 ? -1 : 1) * 0.09 * lift;
+          sx += lift > 0.85 ? 0.08 : 0;
+          sy -= lift > 0.85 ? 0.06 : 0;
+        } else if (u.moveMode === 'shuffle') {
+          const step = Math.sin(t * 14 + u.phase);
+          rot += step * 0.025;
+          bob += Math.abs(step) * -0.9;
+        } else if (u.moveMode === 'fly') {
+          rot += Math.sin(t * 5 + u.phase) * 0.12;
+          bob += Math.sin(t * 6 + u.phase) * 5;
+        } else {
+          // Base-pivot waddle: the whole molded toy rocks from oval-base edge
+          // to oval-base edge. The figure/legs never cycle independently.
+          const ph = (t * 3.1 + u.phase) % 1;
+          const edge = ph < 0.5 ? -1 : 1;
+          const rock = Math.sin(ph * Math.PI);
+          rot += edge * 0.105 * rock;
+          bob -= rock * 1.1;
+          ox += edge * rock * 1.8;
+        }
       } else {
         // firing: rigid, but breathe slightly
         sy *= 1 + Math.sin(this.idleT * 6.3 + u.phase) * 0.012;
       }
 
-      const big = u.kind !== 'soldier' ? 1.55 : 1;
-      body.position.set(x, y + bob);
+      const big = u.kind === 'robot' || u.kind === 'dino' || u.kind === 'rcCar' ? 1.55 : 1;
+      body.position.set(x + ox, y + bob);
       body.rotation = rot;
       body.alpha = alphaV;
       body.scale.set(sx, sy);
@@ -584,6 +684,47 @@ export class Renderer {
       sh.position.set(x, y - 1);
       sh.alpha = alphaV * 0.9;
       sh.scale.set(big + (bob < 0 ? bob * 0.012 : 0), big + (bob < 0 ? bob * 0.012 : 0));
+      if (key.visible) {
+        key.position.set(x + 31, y - 46 + Math.sin(t * 14 + u.phase) * 1.5);
+        key.rotation = t * Math.max(4, u.speed * 0.22);
+        key.alpha = alphaV;
+        key.zIndex = y + 0.2;
+      }
+    }
+
+    const platoonSeen = new Set<number>();
+    const bounds = new Map<number, { minX: number; maxX: number; minY: number; maxY: number }>();
+    for (let i = 0; i < sim.units.length; i++) {
+      const u = sim.units[i];
+      if (!u.active || u.faction !== 0 || u.state === 'dying') continue;
+      platoonSeen.add(u.platoon);
+      const b =
+        bounds.get(u.platoon) ??
+        { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
+      b.minX = Math.min(b.minX, u.homeX);
+      b.maxX = Math.max(b.maxX, u.homeX);
+      b.minY = Math.min(b.minY, u.homeY);
+      b.maxY = Math.max(b.maxY, u.homeY);
+      bounds.set(u.platoon, b);
+    }
+    for (const [platoon, b] of bounds) {
+      const plate = this.formationPlates[platoon - 1];
+      if (plate) {
+        plate.visible = true;
+        plate.position.set((b.minX + b.maxX) * 0.5, (b.minY + b.maxY) * 0.5 + 4);
+        plate.width = Math.max(84, b.maxX - b.minX + 76);
+        plate.height = Math.max(130, b.maxY - b.minY + 58);
+      }
+      const banner = this.banners[platoon - 1];
+      if (!banner) continue;
+      banner.visible = true;
+      banner.scale.set(0.72);
+      banner.position.set(b.minX - 18, Math.max(this.h * LAYOUT.bandTop + 10, b.minY - 18));
+      banner.zIndex = banner.y;
+    }
+    for (let i = 0; i < this.banners.length; i++) {
+      if (!platoonSeen.has(i + 1)) this.banners[i].visible = false;
+      if (!platoonSeen.has(i + 1)) this.formationPlates[i].visible = false;
     }
 
     // pips
@@ -622,8 +763,8 @@ export class Renderer {
         continue;
       }
       f.t += dt;
-      f.spr.alpha = Math.max(0, 1 - f.t / 0.05);
-      if (f.t >= 0.05) f.spr.visible = false;
+      f.spr.alpha = Math.max(0, 1 - f.t / 0.08);
+      if (f.t >= 0.08) f.spr.visible = false;
     }
 
     // rings: negative t = anticipation contraction, positive = shockwave

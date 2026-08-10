@@ -72,6 +72,14 @@ export function bakeAtlas(): Atlas {
   }
   cells.push({ name: 'robot', w: 76, h: 82, draw: (c) => robot(c, ROBOT_P) });
   cells.push({ name: 'dino', w: 88, h: 74, draw: (c) => dino(c, DINO_P) });
+  cells.push({ name: 'green_bazooka', w: 56, h: 58, draw: (c) => bazooka(c, GREEN_P) });
+  cells.push({ name: 'green_gunner', w: 58, h: 56, draw: (c) => gunner(c, GREEN_P) });
+  cells.push({ name: 'rc_car', w: 76, h: 46, draw: rcCar });
+  cells.push({ name: 'paper_plane', w: 72, h: 50, draw: paperPlane });
+  cells.push({ name: 'robot_key', w: 28, h: 28, draw: robotKey });
+  cells.push({ name: 'banner', w: 82, h: 44, draw: banner });
+  cells.push({ name: 'chalk_line', w: 18, h: 240, draw: chalkLine });
+  cells.push({ name: 'formation_plate', w: 110, h: 190, draw: formationPlate });
   cells.push({ name: 'shadow', w: 48, h: 20, draw: shadow });
   cells.push({ name: 'pip', w: 16, h: 16, draw: pip });
   cells.push({ name: 'tracer', w: 30, h: 10, draw: tracer });
@@ -630,6 +638,232 @@ function dino(c: CanvasRenderingContext2D, p: Plastic) {
   c.moveTo(34, 29);
   c.quadraticCurveTo(48, 24, 60, 30);
   c.stroke();
+}
+
+/** Green bazooka tier: same molded base, unmistakable shoulder tube. */
+function bazooka(c: CanvasRenderingContext2D, p: Plastic) {
+  ovalBase(c, p, 28, 51, 17);
+  c.lineCap = 'round';
+  c.strokeStyle = p.base;
+  c.lineWidth = 5.2;
+  line(c, 25, 34, 18, 48);
+  line(c, 28, 34, 35, 48);
+  c.fillStyle = p.base;
+  rr(c, 21, 20, 13, 18, 5);
+  c.fill();
+  c.fillStyle = p.light;
+  rr(c, 28, 22, 5, 12, 3);
+  c.fill();
+  c.fillStyle = p.base;
+  ell(c, 28, 15, 6, 5);
+  c.fill();
+  c.beginPath();
+  c.arc(28, 12, 8, Math.PI, 0);
+  c.lineTo(36, 16);
+  c.lineTo(20, 16);
+  c.closePath();
+  c.fill();
+  c.fillStyle = p.light;
+  c.beginPath();
+  c.arc(27, 12, 5.8, Math.PI, Math.PI * 1.96);
+  c.closePath();
+  c.fill();
+  c.strokeStyle = p.crev;
+  c.lineWidth = 6.4;
+  line(c, 13, 20, 48, 16);
+  c.strokeStyle = p.light;
+  c.lineWidth = 3.2;
+  line(c, 15, 18, 46, 14.5);
+  c.fillStyle = p.spec;
+  ell(c, 41, 14, 2.8, 1, -0.2);
+  c.fill();
+  c.strokeStyle = p.base;
+  c.lineWidth = 4;
+  line(c, 25, 25, 36, 19);
+  line(c, 24, 26, 20, 30);
+}
+
+/** Green machine-gunner: wide low stance and fat barrel silhouette. */
+function gunner(c: CanvasRenderingContext2D, p: Plastic) {
+  ovalBase(c, p, 29, 49, 18);
+  c.lineCap = 'round';
+  c.strokeStyle = p.base;
+  c.lineWidth = 5.5;
+  line(c, 24, 34, 14, 46);
+  line(c, 31, 34, 43, 46);
+  c.fillStyle = p.base;
+  rr(c, 21, 20, 16, 15, 6);
+  c.fill();
+  c.fillStyle = p.light;
+  rr(c, 29, 21.5, 6, 9, 4);
+  c.fill();
+  c.fillStyle = p.base;
+  ell(c, 28, 15.5, 5.6, 4.8);
+  c.fill();
+  c.beginPath();
+  c.arc(28, 12.5, 7.2, Math.PI, 0);
+  c.lineTo(36, 16.4);
+  c.lineTo(20, 16.4);
+  c.closePath();
+  c.fill();
+  c.fillStyle = p.crev;
+  rr(c, 29, 24, 26, 5.5, 2.5);
+  c.fill();
+  c.fillStyle = p.base;
+  rr(c, 35, 21.5, 12, 9, 3);
+  c.fill();
+  c.strokeStyle = p.crev;
+  c.lineWidth = 2;
+  line(c, 47, 24, 56, 22);
+  c.strokeStyle = p.base;
+  c.lineWidth = 3.6;
+  line(c, 27, 26, 37, 25);
+  c.fillStyle = p.spec;
+  ell(c, 32, 12, 2, 0.9, -0.2);
+  c.fill();
+}
+
+function rcCar(c: CanvasRenderingContext2D) {
+  c.fillStyle = 'rgba(20,10,4,0.28)';
+  ell(c, 38, 38, 32, 7);
+  c.fill();
+  c.fillStyle = '#2b2418';
+  ell(c, 18, 35, 6, 6);
+  c.fill();
+  ell(c, 58, 35, 6, 6);
+  c.fill();
+  c.fillStyle = '#c8452c';
+  rr(c, 10, 17, 56, 18, 8);
+  c.fill();
+  c.fillStyle = '#e0674b';
+  rr(c, 15, 18, 44, 7, 5);
+  c.fill();
+  c.fillStyle = '#7e2413';
+  rr(c, 9, 30, 58, 7, 4);
+  c.fill();
+  c.fillStyle = '#8b919b';
+  rr(c, 30, 8, 18, 13, 5);
+  c.fill();
+  c.fillStyle = '#aeb4be';
+  rr(c, 33, 10, 10, 5, 3);
+  c.fill();
+  c.strokeStyle = '#2b2418';
+  c.lineWidth = 2.2;
+  line(c, 48, 12, 63, 3);
+}
+
+function paperPlane(c: CanvasRenderingContext2D) {
+  c.fillStyle = 'rgba(20,10,4,0.18)';
+  ell(c, 39, 37, 22, 5);
+  c.fill();
+  c.fillStyle = '#f5e9d0';
+  c.beginPath();
+  c.moveTo(5, 25);
+  c.lineTo(66, 6);
+  c.lineTo(45, 43);
+  c.closePath();
+  c.fill();
+  c.fillStyle = '#d9c5a0';
+  c.beginPath();
+  c.moveTo(5, 25);
+  c.lineTo(45, 43);
+  c.lineTo(34, 28);
+  c.closePath();
+  c.fill();
+  c.strokeStyle = '#8a7a5c';
+  c.lineWidth = 1.8;
+  line(c, 5, 25, 35, 28);
+  line(c, 35, 28, 66, 6);
+  c.fillStyle = '#fffdf4';
+  ell(c, 49, 14, 5, 1.4, -0.35);
+  c.fill();
+}
+
+function robotKey(c: CanvasRenderingContext2D) {
+  c.strokeStyle = '#9a7014';
+  c.lineWidth = 4;
+  c.beginPath();
+  c.arc(14, 14, 9, 0, Math.PI * 2);
+  c.stroke();
+  c.strokeStyle = '#d9a62e';
+  c.lineWidth = 3;
+  c.beginPath();
+  c.arc(14, 14, 8, 0, Math.PI * 2);
+  c.stroke();
+  c.fillStyle = '#d9a62e';
+  ell(c, 14, 14, 3, 3);
+  c.fill();
+  c.fillStyle = '#f6e3ae';
+  ell(c, 11, 9, 2, 1, -0.5);
+  c.fill();
+}
+
+function banner(c: CanvasRenderingContext2D) {
+  c.strokeStyle = '#6e431a';
+  c.lineWidth = 3;
+  line(c, 9, 4, 9, 43);
+  c.fillStyle = '#f5e9d0';
+  rr(c, 9, 5, 68, 25, 4);
+  c.fill();
+  c.fillStyle = '#d9c5a0';
+  rr(c, 9, 23, 68, 7, 3);
+  c.fill();
+  c.fillStyle = '#c8452c';
+  c.font = '800 8px Arial';
+  c.fillText('CARPET', 25, 17);
+  c.fillStyle = '#4e7d2c';
+  c.fillText('DIVISION', 22, 27);
+}
+
+function chalkLine(c: CanvasRenderingContext2D) {
+  c.strokeStyle = 'rgba(255,250,235,0.78)';
+  c.lineWidth = 5;
+  c.lineCap = 'round';
+  for (let y = 4; y < 236; y += 22) {
+    line(c, 9, y, 9, y + 12);
+  }
+  c.strokeStyle = 'rgba(90,70,45,0.22)';
+  c.lineWidth = 2;
+  for (let y = 12; y < 236; y += 34) {
+    line(c, 13, y, 13, y + 8);
+  }
+}
+
+function formationPlate(c: CanvasRenderingContext2D) {
+  const p = GREEN_P;
+  c.fillStyle = 'rgba(30,50,20,0.16)';
+  c.beginPath();
+  c.ellipse(55, 95, 52, 88, 0, 0, Math.PI * 2);
+  c.fill();
+  c.fillStyle = 'rgba(90,107,60,0.28)';
+  c.beginPath();
+  c.roundRect(8, 8, 94, 174, 30);
+  c.fill();
+  c.strokeStyle = 'rgba(183,198,143,0.42)';
+  c.lineWidth = 2;
+  c.beginPath();
+  c.roundRect(13, 13, 84, 164, 24);
+  c.stroke();
+  c.strokeStyle = 'rgba(59,68,35,0.28)';
+  c.lineWidth = 1.5;
+  for (let y = 28; y <= 160; y += 22) {
+    c.beginPath();
+    c.moveTo(24, y);
+    c.lineTo(86, y);
+    c.stroke();
+  }
+  c.fillStyle = 'rgba(244,248,232,0.35)';
+  for (let y = 31; y <= 163; y += 22) {
+    for (let x = 32; x <= 78; x += 23) {
+      ell(c, x, y, 8, 2.6);
+      c.fill();
+    }
+  }
+  c.fillStyle = p.spec;
+  c.globalAlpha = 0.22;
+  ell(c, 36, 20, 18, 4, -0.2);
+  c.fill();
+  c.globalAlpha = 1;
 }
 
 /** Soft contact shadow, baked radial gradient (bake-time only). */

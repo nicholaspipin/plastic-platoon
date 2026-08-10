@@ -1,4 +1,4 @@
-import { BAND } from '../sim/defs';
+import { BAND, TERRITORY } from '../sim/defs';
 import type { Sim, SimEvent, UpgradeId } from '../sim/sim';
 
 export interface HudCallbacks {
@@ -10,8 +10,8 @@ export interface HudCallbacks {
 const UPGRADE_DEFS: { id: UpgradeId; name: string; blurb: string }[] = [
   { id: 'faster', name: 'FASTER MOLD', blurb: 'Stamp soldiers quicker' },
   { id: 'bigger', name: 'BIGGER MOLD', blurb: '+1 soldier per stamp' },
-  { id: 'rifles', name: 'RIFLES', blurb: '+25% damage' },
-  { id: 'scouts', name: 'SCOUTS', blurb: '+12% march speed' },
+  { id: 'rifles', name: 'RIFLE DRILL', blurb: '+damage per rank' },
+  { id: 'scouts', name: 'SCOUT HOPS', blurb: 'Faster toy steps' },
 ];
 
 /** DOM overlay HUD. The canvas renders the world; this renders the toy packaging. */
@@ -19,6 +19,12 @@ export class Hud {
   private root: HTMLElement;
   private scrapEl!: HTMLElement;
   private waveEl!: HTMLElement;
+  private waveTextEl!: HTMLElement;
+  private zoneFillEl!: HTMLElement;
+  private zoneLabelEl!: HTMLElement;
+  private supplyEl!: HTMLElement;
+  private dailyEl!: HTMLElement;
+  private vaultEl!: HTMLElement;
   private battalionEl!: HTMLElement;
   private bandEl!: HTMLElement;
   private bandFillEl!: HTMLElement;
@@ -51,7 +57,8 @@ export class Hud {
 
     const top = div('hud-top');
     this.waveEl = div('chip wave-chip');
-    this.waveEl.textContent = 'WAVE 1';
+    this.waveEl.innerHTML = `<span class="wave-text">WAVE 1</span><span class="boss-pips"><i></i><i></i><i></i><i></i><i></i></span>`;
+    this.waveTextEl = this.waveEl.querySelector('.wave-text') as HTMLElement;
     const right = div('hud-top-right');
     this.scrapEl = div('chip scrap-chip');
     this.scrapEl.innerHTML = `<span class="scrap-ico"></span><span class="scrap-num">0</span>`;
@@ -68,6 +75,18 @@ export class Hud {
     right.append(this.scrapEl, this.muteBtn);
     top.append(this.waveEl, right);
 
+    const zoneStrip = div('zone-strip');
+    this.zoneFillEl = div('zone-fill');
+    this.zoneLabelEl = div('zone-label');
+    this.zoneLabelEl.textContent = 'BEDROOM CARPET';
+    const markers = div('zone-markers');
+    for (let i = 0; i < TERRITORY.checkpointAt.length; i++) {
+      const m = div('zone-marker');
+      m.style.left = `${TERRITORY.checkpointAt[i] * 100}%`;
+      markers.appendChild(m);
+    }
+    zoneStrip.append(this.zoneFillEl, markers, this.zoneLabelEl);
+
     this.battalionEl = div('chip battalion-chip');
     this.battalionEl.style.display = 'none';
 
@@ -76,11 +95,12 @@ export class Hud {
     this.bandEl.innerHTML = `<div class="band-fill"></div><span class="band-ico">${bandSvg()}</span><span class="band-label">TAP TO SNAP!</span>`;
     this.bandFillEl = this.bandEl.querySelector('.band-fill') as HTMLElement;
 
-    const shelf = div('shelf');
+    const shelf = div('shelf price-tray');
     for (const def of UPGRADE_DEFS) {
       const b = document.createElement('button');
       b.className = 'buy-btn';
       b.innerHTML = `
+        <span class="notify-dot"></span>
         <span class="gloss"></span>
         <span class="buy-name">${def.name}</span>
         <span class="buy-blurb">${def.blurb}</span>
@@ -95,22 +115,35 @@ export class Hud {
       this.lvlEls.set(def.id, b.querySelector('.buy-lvl') as HTMLElement);
       shelf.appendChild(b);
     }
-    bottom.append(this.bandEl, shelf);
+    const next = div('next-unlock');
+    next.innerHTML = `<span class="silhouette"></span><span><b>NEXT</b> BAZOOKA BAG</span>`;
+    shelf.appendChild(next);
+
+    const hooks = div('reward-hooks');
+    this.supplyEl = div('hook-chip supply');
+    this.supplyEl.textContent = 'DROP IN 5';
+    this.dailyEl = div('hook-chip daily');
+    this.dailyEl.textContent = 'DAILY 0/3';
+    this.vaultEl = div('hook-chip vault');
+    this.vaultEl.textContent = 'VAULT 0%';
+    hooks.append(this.supplyEl, this.dailyEl, this.vaultEl);
+    bottom.append(this.bandEl, shelf, hooks);
 
     const badge = div('build-badge');
     badge.textContent = (import.meta.env.VITE_COMMIT_SHA ?? 'dev').slice(0, 7);
 
-    this.root.append(top, this.battalionEl, bottom, badge);
+    this.root.append(top, zoneStrip, this.battalionEl, bottom, badge);
   }
 
   showIntro(onStart: () => void) {
     const overlay = div('intro-overlay');
-    const card = div('intro-card');
-    card.innerHTML = `
-      <div class="intro-brand">PLASTIC<br>PLATOON</div>
+    const logo = div('intro-logo');
+    logo.innerHTML = `PLASTIC<br>PLATOON`;
+    const prompt = div('intro-prompt');
+    prompt.innerHTML = `
       <div class="intro-sub">The floor is a battlefield</div>
       <button class="cta-btn">TAP TO DEPLOY</button>`;
-    overlay.appendChild(card);
+    overlay.append(logo, prompt);
     this.root.appendChild(overlay);
     const go = () => {
       overlay.classList.add('closing');
@@ -132,6 +165,19 @@ export class Hud {
         this.waveEl.classList.remove('pop');
         void this.waveEl.offsetWidth;
         this.waveEl.classList.add('pop');
+        break;
+      case 'platoon':
+        this.battalionEl.style.display = '';
+        this.battalionEl.textContent = e.label;
+        this.battalionEl.classList.remove('pop');
+        void this.battalionEl.offsetWidth;
+        this.battalionEl.classList.add('pop');
+        break;
+      case 'checkpoint':
+        this.zoneLabelEl.textContent = e.name.toUpperCase();
+        this.zoneLabelEl.classList.remove('pop');
+        void this.zoneLabelEl.offsetWidth;
+        this.zoneLabelEl.classList.add('pop');
         break;
       case 'buy': {
         const b = this.upgradeBtns.get(e.id);
@@ -157,7 +203,10 @@ export class Hud {
     }
 
     const waveText = `WAVE ${sim.state.wave}`;
-    if (this.waveEl.textContent !== waveText) this.waveEl.textContent = waveText;
+    if (this.waveTextEl.textContent !== waveText) this.waveTextEl.textContent = waveText;
+    const bossPips = Array.from(this.waveEl.querySelectorAll('.boss-pips i'));
+    const lit = ((sim.state.wave - 1) % 5) + 1;
+    for (let i = 0; i < bossPips.length; i++) bossPips[i].classList.toggle('lit', i < lit);
     // count-up animation — never snap
     const target = Math.floor(sim.state.scrap);
     if (this.displayedScrap !== target) {
@@ -182,6 +231,7 @@ export class Hud {
       if (this.lastAfford.get(id) !== afford) {
         this.lastAfford.set(id, afford);
         b.classList.toggle('disabled', !afford);
+        b.classList.toggle('affordable', afford);
       }
     }
 
@@ -192,6 +242,13 @@ export class Hud {
       this.battalionEl.style.display = battalion ? '' : 'none';
       if (battalion) this.battalionEl.textContent = battalion;
     }
+
+    const progress = Math.min(1, sim.state.push / TERRITORY.zoneLength);
+    this.zoneFillEl.style.transform = `scaleX(${progress})`;
+    this.supplyEl.textContent = `DROP IN ${5 - ((sim.state.wave - 1) % 5)}`;
+    this.dailyEl.textContent = `DAILY ${Math.min(3, Math.floor(sim.state.wave / 3))}/3`;
+    const vault = Math.min(100, Math.floor((sim.state.scrap / Math.max(1, sim.scrapRate * 60 * 60 * 4.5)) * 100));
+    this.vaultEl.textContent = sim.scrapRate > 0 ? `VAULT ${vault}%` : 'VAULT 0%';
 
     const frac = sim.bandCd <= 0 ? 1 : 1 - sim.bandCd / BAND.cd;
     if (Math.abs(frac - this.lastBandFrac) > 0.005) {

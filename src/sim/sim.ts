@@ -3,21 +3,28 @@ import {
   CAPS,
   COSTS,
   DINO,
+  FORMATION,
   GREEN,
+  HAZARDS,
   LAYOUT,
   MOLDER,
+  PAPER_PLANE,
   PRESTIGE,
+  RC_CAR,
   RIFLES_DMG_PER_LEVEL,
   ROBOT,
   SCOUTS_SPD_PER_LEVEL,
   SIM_DT,
   TAN,
+  TERRITORY,
   WAVES,
 } from './defs';
 import { mulberry32, type Rng } from './rng';
 
 export type Faction = 0 | 1; // 0 green, 1 tan
-export type UnitKind = 'soldier' | 'robot' | 'dino';
+export type UnitKind = 'rifleman' | 'bazooka' | 'gunner' | 'robot' | 'dino' | 'rcCar' | 'paperPlane';
+export type MoveMode = 'waddle' | 'hop' | 'shuffle' | 'fly';
+export type FormationShape = 'line' | 'wedge' | 'square';
 
 export interface Unit {
   active: boolean;
@@ -43,6 +50,14 @@ export interface Unit {
   phase: number; // anim phase offset
   variant: number; // sprite pose variant
   laneY: number; // assigned lane — units fan out toward it after spawning
+  formationIndex: number;
+  formationRank: number;
+  formationCol: number;
+  platoon: number;
+  homeX: number;
+  homeY: number;
+  moveMode: MoveMode;
+  stunT: number;
 }
 
 export interface Pip {
@@ -67,7 +82,12 @@ export type SimEvent =
   | { type: 'band'; x: number; y: number }
   | { type: 'bandReady' }
   | { type: 'waveStart'; wave: number; boss: UnitKind | null }
-  | { type: 'buy'; id: UpgradeId };
+  | { type: 'buy'; id: UpgradeId }
+  | { type: 'platoon'; platoon: number; label: string; x: number; y: number }
+  | { type: 'checkpoint'; index: number; name: string }
+  | { type: 'commandLine'; x: number }
+  | { type: 'hazard'; kind: 'marble' | 'paper' | 'glue' | 'cat'; x: number; y: number }
+  | { type: 'stepTik'; count: number };
 
 export type UpgradeId = 'faster' | 'bigger' | 'rifles' | 'scouts';
 
@@ -77,6 +97,10 @@ export interface SimState {
   wave: number;
   medals: number;
   zone: number;
+  push: number;
+  bestPush: number;
+  checkpoint: number;
+  formation: FormationShape;
   upgrades: Record<UpgradeId, number>;
 }
 
@@ -100,11 +124,15 @@ export class Sim {
     wave: 1,
     medals: 0,
     zone: 0,
+    push: 0,
+    bestPush: 0,
+    checkpoint: 0,
+    formation: 'line',
     upgrades: { faster: 0, bigger: 0, rifles: 0, scouts: 0 },
   };
 
   // molder
-  stampT = 1.2; // first stamp comes quickly
+  stampT = 0.18; // first stamps come quickly: the army fantasy starts immediately
   // wave machinery
   waveActive = false;
   intermissionT = 1.0;
@@ -116,6 +144,12 @@ export class Sim {
   bandCd = 0;
   // battalion reserve: greens beyond the render cap
   greenReserve = 0;
+  commandLineX = 0;
+  private nextPlatoonAnnounced = 1;
+  private hazardT = 8;
+  private paperT = 18;
+  private catT = 48;
+  private stepTikT = 0;
   // rolling scrap rate for offline earnings (scrap/sec, exponentially smoothed)
   scrapRate = 0;
   private scrapThisSecond = 0;
@@ -126,11 +160,15 @@ export class Sim {
     this.rng = mulberry32(seed);
     for (let i = 0; i < CAPS.maxUnits; i++) this.units.push(makeUnit());
     for (let i = 0; i < CAPS.pips; i++) this.pips.push(makePip());
+    this.commandLineX = this.w * FORMATION.commandDefaultX;
+    for (let i = 0; i < MOLDER.openingBurst; i++) this.spawnGreen();
+    this.events.length = 0;
   }
 
   resize(w: number, h: number) {
     this.w = w;
     this.h = h;
+    if (!this.commandLineX) this.commandLineX = this.w * FORMATION.commandDefaultX;
   }
 
   // -------------------------------------------------- derived stats
@@ -190,6 +228,10 @@ export class Sim {
     this.state.wave = 1;
     this.state.upgrades = { faster: 0, bigger: 0, rifles: 0, scouts: 0 };
     this.state.zone = 0;
+    this.state.push = 0;
+    this.state.bestPush = 0;
+    this.state.checkpoint = 0;
+    this.state.formation = 'line';
     for (const u of this.units) u.active = false;
     for (const p of this.pips) p.active = false;
     this.greenReserve = 0;
@@ -197,8 +239,16 @@ export class Sim {
     this.intermissionT = 1.5;
     this.toSpawn = 0;
     this.bossToSpawn = null;
-    this.stampT = 1.2;
+    this.stampT = 0.18;
     this.bandCd = 0;
+    this.nextPlatoonAnnounced = 1;
+  }
+
+  setCommandLine(x: number) {
+    const lo = this.w * FORMATION.commandMinX;
+    const hi = this.w * FORMATION.commandMaxX;
+    this.commandLineX = clamp(x, lo, hi);
+    this.events.push({ type: 'commandLine', x: this.commandLineX });
   }
 
   // -------------------------------------------------- input
@@ -242,6 +292,10 @@ export class Sim {
 
     // waves
     this.stepWaves(dt);
+    this.assignFormations();
+    this.stepTerritory(dt);
+    this.stepHazards(dt);
+    this.stepFootTiks(dt);
 
     // units
     for (let i = 0; i < this.units.length; i++) {
@@ -251,9 +305,10 @@ export class Sim {
       u.py = u.y;
       if (u.state === 'dying') {
         u.deathT += dt;
-        if (u.deathT > 0.6) u.active = false;
+        if (u.deathT > 0.95) u.active = false;
         continue;
       }
+      if (u.stunT > 0) u.stunT = Math.max(0, u.stunT - dt);
       this.stepUnit(i, u, dt);
     }
     this.separate(dt);
@@ -287,6 +342,132 @@ export class Sim {
       }
     }
     this.events.push({ type: 'stamp', count: Math.max(spawned, 1) });
+    const visibleGreens = this.countActive(0);
+    while (visibleGreens + this.greenReserve >= this.nextPlatoonAnnounced * FORMATION.platoonSize) {
+      const platoon = this.nextPlatoonAnnounced;
+      this.events.push({
+        type: 'platoon',
+        platoon,
+        label: platoonLabel(platoon),
+        x: this.commandLineX - 44,
+        y: this.h * LAYOUT.bandTop + 24 + (platoon % 4) * 22,
+      });
+      this.nextPlatoonAnnounced++;
+    }
+  }
+
+  private assignFormations() {
+    const greens: number[] = [];
+    for (let i = 0; i < this.units.length; i++) {
+      const u = this.units[i];
+      if (u.active && u.faction === 0 && u.state !== 'dying') greens.push(i);
+    }
+    greens.sort((a, b) => this.units[b].x - this.units[a].x || a - b);
+
+    const bandTop = this.h * LAYOUT.bandTop;
+    const bandBot = this.h * LAYOUT.bandBot;
+    const cols = FORMATION.columns;
+    const colGap = (bandBot - bandTop) / cols;
+    const shape = this.state.formation;
+
+    for (let order = 0; order < greens.length; order++) {
+      const u = this.units[greens[order]];
+      const rank = Math.floor(order / cols);
+      const col = order % cols;
+      const centeredCol = col - (cols - 1) / 2;
+      let x = this.commandLineX - rank * FORMATION.rankXStep;
+      let y = bandTop + colGap * (col + 0.5);
+
+      if (shape === 'wedge') {
+        x -= Math.abs(centeredCol) * 5 + rank * 2;
+      } else if (shape === 'square') {
+        const squareRank = Math.floor(order / 10);
+        const squareCol = order % 10;
+        x = this.commandLineX - squareRank * 18;
+        y = bandTop + ((squareCol + 0.5) / 10) * (bandBot - bandTop);
+      }
+
+      u.formationIndex = order;
+      u.formationRank = rank;
+      u.formationCol = col;
+      u.platoon = Math.floor(order / FORMATION.platoonSize) + 1;
+      u.homeX = x;
+      u.homeY = y;
+      u.laneY = y;
+    }
+  }
+
+  private stepTerritory(dt: number) {
+    const greens = this.countActive(0) + this.greenReserve * 0.25;
+    const tans = this.countActive(1);
+    const advantage = greens - tans * 1.2;
+    const speed =
+      advantage >= 0
+        ? Math.min(18, TERRITORY.pushBasePerSec + advantage * 0.06)
+        : -Math.min(10, TERRITORY.retreatBasePerSec + Math.abs(advantage) * 0.08);
+    const shapeBonus = this.state.formation === 'wedge' ? 1.12 : this.state.formation === 'square' ? 0.9 : 1;
+    this.state.push = clamp(this.state.push + speed * shapeBonus * dt, 0, TERRITORY.zoneLength);
+    this.state.bestPush = Math.max(this.state.bestPush, this.state.push);
+
+    const progress = this.state.push / TERRITORY.zoneLength;
+    const next = this.state.checkpoint;
+    if (next < TERRITORY.checkpointAt.length && progress >= TERRITORY.checkpointAt[next]) {
+      this.state.checkpoint++;
+      this.events.push({
+        type: 'checkpoint',
+        index: next,
+        name: TERRITORY.checkpointNames[next],
+      });
+      if (next === 0) this.state.formation = 'wedge';
+      if (next === 1) this.state.formation = 'square';
+    }
+  }
+
+  private stepHazards(dt: number) {
+    this.hazardT -= dt;
+    this.paperT -= dt;
+    this.catT -= dt;
+
+    if (this.hazardT <= 0) {
+      this.hazardT += HAZARDS.marbleEvery + this.rng() * 8;
+      const y = this.h * (LAYOUT.bandTop + this.rng() * (LAYOUT.bandBot - LAYOUT.bandTop));
+      this.events.push({ type: 'hazard', kind: 'marble', x: this.w + 20, y });
+      for (let i = 0; i < this.units.length; i++) {
+        const u = this.units[i];
+        if (!u.active || u.state === 'dying') continue;
+        if (Math.abs(u.y - y) < 28 && u.x > this.w * 0.45) this.damage(i, 1.1, u.faction === 0 ? -1 : 1);
+      }
+    }
+
+    if (this.paperT <= 0) {
+      this.paperT += HAZARDS.paperEvery + this.rng() * 10;
+      this.spawnTan('paperPlane');
+      this.events.push({ type: 'hazard', kind: 'paper', x: this.w * 0.72, y: this.h * 0.34 });
+    }
+
+    if (this.catT <= 0) {
+      this.catT += HAZARDS.catEvery + this.rng() * 28;
+      const y = this.h * 0.55;
+      this.events.push({ type: 'hazard', kind: 'cat', x: this.w * 0.86, y });
+      for (const u of this.units) {
+        if (!u.active || u.state === 'dying') continue;
+        u.stunT = Math.max(u.stunT, 1.4);
+        u.x += (this.rng() - 0.5) * 42;
+        u.y = clamp(u.y + (this.rng() - 0.5) * 54, this.h * LAYOUT.bandTop, this.h * LAYOUT.bandBot);
+      }
+    }
+  }
+
+  private stepFootTiks(dt: number) {
+    this.stepTikT -= dt;
+    if (this.stepTikT > 0) return;
+    const marchers = this.countActive(0);
+    if (marchers < 12) {
+      this.stepTikT = 0.45;
+      return;
+    }
+    this.stepTikT = clamp(0.34 - marchers * 0.0012, 0.16, 0.34);
+    this.events.push({ type: 'stepTik', count: marchers });
   }
 
   private spawnGreen() {
@@ -298,7 +479,9 @@ export class Sim {
     const u = this.units[i];
     const bandTop = this.h * LAYOUT.bandTop;
     const bandBot = this.h * LAYOUT.bandBot;
-    resetUnit(u, 0, 'soldier');
+    const tierRoll = this.state.upgrades.rifles + this.state.upgrades.bigger;
+    const kind: UnitKind = tierRoll >= 7 && this.rng() < 0.16 ? 'gunner' : tierRoll >= 3 && this.rng() < 0.18 ? 'bazooka' : 'rifleman';
+    resetUnit(u, 0, kind);
     // eject onto the molder's output tray (right of the platens — units must
     // never clip through the machine), then fan out to an assigned lane
     u.x = LAYOUT.molderX + 58 + this.rng() * 16;
@@ -306,14 +489,16 @@ export class Sim {
     u.laneY = bandTop + this.rng() * (bandBot - bandTop);
     u.px = u.x;
     u.py = u.y;
-    u.hp = u.maxHp = GREEN.hp;
-    u.speed = this.greenSpeed * (0.92 + this.rng() * 0.16);
-    u.range = GREEN.range;
-    u.cd = GREEN.cd;
+    const tierBonus = kind === 'gunner' ? 1.45 : kind === 'bazooka' ? 1.9 : 1;
+    u.hp = u.maxHp = GREEN.hp * (kind === 'gunner' ? 1.3 : 1);
+    u.speed = this.greenSpeed * (0.92 + this.rng() * 0.16) * (kind === 'bazooka' ? 0.9 : 1);
+    u.range = GREEN.range + (kind === 'bazooka' ? 30 : kind === 'gunner' ? 15 : 0);
+    u.cd = GREEN.cd * (kind === 'gunner' ? 0.72 : kind === 'bazooka' ? 1.45 : 1);
     u.fireCd = GREEN.cd * (0.3 + this.rng() * 0.7);
-    u.dmg = 1; // green dmg read live from greenDmg (battalion/rifles scale)
+    u.dmg = tierBonus;
     u.phase = this.rng() * Math.PI * 2;
     u.variant = (this.rng() * 3) | 0;
+    u.moveMode = this.state.upgrades.scouts > 0 && u.variant === 2 ? 'hop' : 'waddle';
     this.events.push({ type: 'spawn', i });
   }
 
@@ -324,9 +509,29 @@ export class Sim {
     const bandTop = this.h * LAYOUT.bandTop;
     const bandBot = this.h * LAYOUT.bandBot;
     resetUnit(u, 1, kind);
-    const def = kind === 'robot' ? ROBOT : kind === 'dino' ? DINO : TAN;
-    const hpBase = kind === 'soldier' ? TAN.hpBase : def.hpBase;
-    const scale = 1 + (kind === 'dino' ? DINO.hpWaveScale : kind === 'robot' ? ROBOT.hpWaveScale : TAN.hpWaveScale) * this.state.wave;
+    const def =
+      kind === 'robot'
+        ? ROBOT
+        : kind === 'dino'
+          ? DINO
+          : kind === 'rcCar'
+            ? RC_CAR
+            : kind === 'paperPlane'
+              ? PAPER_PLANE
+              : TAN;
+    const hpBase = kind === 'rifleman' ? TAN.hpBase : def.hpBase;
+    const scale =
+      1 +
+      (kind === 'dino'
+        ? DINO.hpWaveScale
+        : kind === 'robot'
+          ? ROBOT.hpWaveScale
+          : kind === 'rcCar'
+            ? RC_CAR.hpWaveScale
+            : kind === 'paperPlane'
+              ? PAPER_PLANE.hpWaveScale
+              : TAN.hpWaveScale) *
+        this.state.wave;
     u.x = this.w + 30 + this.rng() * 40;
     u.y = bandTop + this.rng() * (bandBot - bandTop);
     u.laneY = u.y;
@@ -338,9 +543,10 @@ export class Sim {
     u.cd = def.cd;
     u.fireCd = def.cd * (0.5 + this.rng() * 0.5);
     u.dmg = def.dmg;
-    u.scrap = (kind === 'soldier' ? TAN.scrap : def.scrap) * this.waveHpMult;
+    u.scrap = (kind === 'rifleman' ? TAN.scrap : def.scrap) * this.waveHpMult;
     u.phase = this.rng() * Math.PI * 2;
     u.variant = (this.rng() * 3) | 0;
+    u.moveMode = kind === 'robot' ? 'shuffle' : kind === 'paperPlane' ? 'fly' : kind === 'rcCar' ? 'hop' : 'waddle';
     this.events.push({ type: 'spawn', i });
     return true;
   }
@@ -354,7 +560,7 @@ export class Sim {
           // only consume the spawn if the pool actually had a slot
           if (this.bossToSpawn) {
             if (this.spawnTan(this.bossToSpawn)) this.bossToSpawn = null;
-          } else if (this.spawnTan('soldier')) {
+          } else if (this.spawnTan('rifleman')) {
             this.toSpawn--;
           }
         }
@@ -375,6 +581,7 @@ export class Sim {
     // zone progression: Under the Bed from wave 15 (more zones post-M3)
     if (w >= 15 && this.state.zone < 1) this.state.zone = 1;
     const isBossWave = w % ROBOT.everyNWaves === 0;
+    const isRcWave = !isBossWave && w >= 4 && w % 4 === 0;
     let count = WAVES.baseCount + Math.round(w * WAVES.countGrowth);
     if (isBossWave) count = Math.max(3, Math.round(count * 0.5));
     const rendered = Math.min(count, CAPS.tanRendered);
@@ -385,6 +592,8 @@ export class Sim {
       ? this.state.zone >= 1 && (w / ROBOT.everyNWaves) % 2 === 0
         ? 'dino'
         : 'robot'
+      : isRcWave
+        ? 'rcCar'
       : null;
     this.bossToSpawn = boss;
     this.waveActive = true;
@@ -393,6 +602,11 @@ export class Sim {
   }
 
   private stepUnit(i: number, u: Unit, dt: number) {
+    if (u.stunT > 0) {
+      u.state = 'march';
+      return;
+    }
+
     // periodic retarget
     u.retargetIn -= dt;
     if (u.retargetIn <= 0 || (u.target >= 0 && !this.validTarget(u.target, u.faction))) {
@@ -407,6 +621,7 @@ export class Sim {
       const dy = t.y - u.y;
       inRange = dx * dx + dy * dy <= u.range * u.range;
     }
+    if (u.faction === 0 && u.formationRank > 1) inRange = false;
 
     if (inRange && t) {
       u.state = 'fight';
@@ -414,40 +629,62 @@ export class Sim {
       if (u.fireCd <= 0) {
         u.fireCd = u.cd * (0.92 + this.rng() * 0.16);
         this.events.push({ type: 'fire', i, tx: t.x, ty: t.y, faction: u.faction });
-        const dmg = u.faction === 0 ? this.greenDmg : u.dmg;
+        const dmg = u.faction === 0 ? this.greenDmg * u.dmg : u.dmg;
         this.damage(u.target, dmg, u.faction === 0 ? 1 : -1);
       }
     } else {
       u.state = 'march';
-      const dir = u.faction === 0 ? 1 : -1;
-      let vx = dir * u.speed;
-      let vy = Math.sin(this.time * 1.7 + u.phase) * 6; // gentle organic drift
-      // fan out toward the assigned lane (fresh stamps leave the tray this way)
-      const laneDy = u.laneY - u.y;
-      vy += Math.sign(laneDy) * Math.min(Math.abs(laneDy), 34) * 1.4;
-      // hold lines are staggered per-unit so formations read as ragged toy
-      // battle lines, not a single-file column
-      const spread = u.phase / (Math.PI * 2) - 0.5; // stable -0.5..0.5
-      // greens hold the rally line when unopposed and never chase off-screen;
-      // tans never pass the stop line (no fail state)
-      // deep formations (±65–70px) so the army reads as ranks, not a wall;
-      // the advance clamp keeps the exchange of fire in mid-screen frame
-      if (u.faction === 0 && !t && u.x > this.w * LAYOUT.rallyX + spread * 130) vx = 0;
-      if (u.faction === 0 && vx > 0 && u.x > this.w * 0.68 + spread * 140) vx = 0;
-      if (u.faction === 1 && u.x < LAYOUT.tanStopX + (spread + 0.5) * 90) vx = 0;
-      // range is radial, so only home toward the target's lane when badly off —
-      // constant homing funnels the whole army into one clump
-      if (t) {
-        const dy = t.y - u.y;
-        if (Math.abs(dy) > u.range * 0.55) vy += Math.sign(dy) * 14;
+      if (u.faction === 0) {
+        let tx = u.homeX || this.commandLineX;
+        let ty = u.homeY || u.laneY;
+        if (t && u.formationRank <= 1) {
+          tx = Math.min(this.commandLineX + 14, t.x - u.range * 0.82);
+          ty = ty * 0.7 + t.y * 0.3;
+        }
+        const dx = tx - u.x;
+        const dy = ty - u.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > FORMATION.slotArriveRadius) {
+          const speed = u.speed * (u.moveMode === 'hop' ? 1.12 : 1) * this.terrainSpeedMul(u);
+          u.x += (dx / dist) * speed * dt;
+          u.y += (dy / dist) * speed * dt;
+        }
+      } else {
+        const dir = -1;
+        let vx = dir * u.speed * this.terrainSpeedMul(u);
+        let vy = Math.sin(this.time * 1.7 + u.phase) * 6;
+        if (u.kind === 'paperPlane') {
+          vy += Math.sin(this.time * 4 + u.phase) * 18;
+          vx *= 1.25;
+        }
+        if (u.kind === 'rcCar') {
+          vy *= 0.2;
+          if (u.x < this.w * 0.18) u.active = false;
+        }
+        const laneDy = u.laneY - u.y;
+        vy += Math.sign(laneDy) * Math.min(Math.abs(laneDy), 34) * 1.2;
+        const spread = u.phase / (Math.PI * 2) - 0.5;
+        if (u.kind !== 'rcCar' && u.kind !== 'paperPlane' && u.x < LAYOUT.tanStopX + (spread + 0.5) * 90) vx = 0;
+        if (t) {
+          const dy = t.y - u.y;
+          if (Math.abs(dy) > u.range * 0.55) vy += Math.sign(dy) * 14;
+        }
+        u.x += vx * dt;
+        u.y += vy * dt;
       }
-      u.x += vx * dt;
-      u.y += vy * dt;
       const bandTop = this.h * LAYOUT.bandTop;
       const bandBot = this.h * LAYOUT.bandBot;
       if (u.y < bandTop) u.y = bandTop;
       if (u.y > bandBot) u.y = bandBot;
     }
+  }
+
+  private terrainSpeedMul(u: Unit) {
+    const gx = this.w * HAZARDS.glueX;
+    const gy = this.h * HAZARDS.glueY;
+    const dx = u.x - gx;
+    const dy = u.y - gy;
+    return dx * dx + dy * dy < HAZARDS.glueRadius * HAZARDS.glueRadius ? HAZARDS.glueSlow : 1;
   }
 
   /**
@@ -621,7 +858,7 @@ function makeUnit(): Unit {
   return {
     active: false,
     faction: 0,
-    kind: 'soldier',
+    kind: 'rifleman',
     x: 0,
     y: 0,
     px: 0,
@@ -642,6 +879,14 @@ function makeUnit(): Unit {
     phase: 0,
     variant: 0,
     laneY: 0,
+    formationIndex: 0,
+    formationRank: 0,
+    formationCol: 0,
+    platoon: 1,
+    homeX: 0,
+    homeY: 0,
+    moveMode: 'waddle',
+    stunT: 0,
   };
 }
 
@@ -654,6 +899,14 @@ function resetUnit(u: Unit, faction: Faction, kind: UnitKind) {
   u.retargetIn = 0;
   u.tipDir = faction === 0 ? -1 : 1;
   u.scrap = 0;
+  u.stunT = 0;
+  u.formationIndex = 0;
+  u.formationRank = 0;
+  u.formationCol = 0;
+  u.platoon = 1;
+  u.homeX = 0;
+  u.homeY = 0;
+  u.moveMode = 'waddle';
 }
 
 function makePip(): Pip {
@@ -662,4 +915,9 @@ function makePip(): Pip {
 
 function clamp(v: number, lo: number, hi: number) {
   return v < lo ? lo : v > hi ? hi : v;
+}
+
+function platoonLabel(platoon: number) {
+  const suffix = platoon === 1 ? 'ST' : platoon === 2 ? 'ND' : platoon === 3 ? 'RD' : 'TH';
+  return `${platoon}${suffix} CARPET DIVISION`;
 }
