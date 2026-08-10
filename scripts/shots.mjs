@@ -85,6 +85,31 @@ await shot('4-upgrade', async () => {
   await page.waitForTimeout(220);
 });
 
+// 5. zone 2: Under the Bed
+await shot('5-zone2', async () => {
+  await dismissIntro();
+  await page.evaluate(() => {
+    const pp = window.__pp;
+    pp.setScrap(3000);
+    pp.buy('faster');
+    pp.buy('faster');
+    pp.buy('bigger');
+    pp.buy('bigger');
+    pp.sim.state.wave = 15;
+    let guard = 0;
+    while (pp.sim.state.zone < 1 && guard++ < 90) pp.ff(1);
+    guard = 0;
+    while (
+      (pp.sim.countActive(1) < 6 ||
+        pp.sim.units.some((u) => u.active && u.faction === 1 && u.x > pp.sim.w * 0.92)) &&
+      guard++ < 240
+    ) {
+      pp.ff(0.25);
+    }
+  });
+  await page.waitForTimeout(1600);
+});
+
 if (errors.length) {
   console.error('CONSOLE ERRORS:');
   for (const e of errors) console.error('  ' + e);

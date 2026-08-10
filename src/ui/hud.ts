@@ -9,6 +9,8 @@ export interface HudCallbacks {
 const UPGRADE_DEFS: { id: UpgradeId; name: string; blurb: string }[] = [
   { id: 'faster', name: 'FASTER MOLD', blurb: 'Stamp soldiers quicker' },
   { id: 'bigger', name: 'BIGGER MOLD', blurb: '+1 soldier per stamp' },
+  { id: 'rifles', name: 'RIFLES', blurb: '+25% damage' },
+  { id: 'scouts', name: 'SCOUTS', blurb: '+12% march speed' },
 ];
 
 /** DOM overlay HUD. The canvas renders the world; this renders the toy packaging. */
