@@ -1,74 +1,75 @@
-# PLASTIC PLATOON — PLAN
+# Plastic Platoon Plan
 
-## 0. Situation
+## Scope
 
-The brief references a validated prototype at `reference/plastic-platoon-prototype.html`. **That file does not exist** in the repo or anywhere on this machine (searched Downloads/Documents/Desktop/OneDrive). The brief's §3.1 (core loop) and §3.2 (exact baseline numbers) fully specify the prototype's mechanics and tuning, so the game is rebuilt from spec. Logged in DECISIONS.md #1.
+Build Plastic Platoon as a portrait-first mobile web idle lane-battle game using PixiJS v8, Vite, and TypeScript. The target is a static build suitable for GitHub Pages and iOS home-screen launch. The brief is the source of truth.
 
-## 1. Architecture
+## Current Workspace Facts
 
-### Stack
-- **PixiJS v8 (WebGL) + Vite + TypeScript**, static output → GitHub Pages. (Brief's preferred stack; see DECISIONS.md #2.)
-- **DOM overlay for UI**, canvas for the world. The toy-packaging UI kit (blister packs, sticker labels, chunky extruded buttons, popups) is dramatically cheaper and better-looking in HTML/CSS than in-canvas. Canvas keeps: units, VFX, props, ground, tilt-shift pass, scrap pips. DOM keeps: counters, upgrade buttons, cards/popups, build badge. (DECISIONS.md #3.)
-- **Audio:** hand-rolled WebAudio synth (no samples). Unlocked on first gesture; mute persisted.
+- No existing repository is present in this workspace.
+- The referenced prototype `reference/plastic-platoon-prototype.html` is not present in the workspace or attachment folder.
+- Git, Node, npm, and GitHub CLI are available locally.
+- GitHub Pages deployment may require a GitHub account/repo target. If no authenticated remote is available, local build and commit will be completed and deployment recorded as blocked.
 
-### Module layout (`src/`)
-```
-main.ts            boot, Pixi app, resize, DPR cap, loop wiring
-sim/
-  sim.ts           fixed-timestep simulation (60 Hz), all game rules
-  units.ts         unit pools + stats (green, tan, bosses)
-  waves.ts         wave scheduling/scaling
-  economy.ts       scrap, upgrades, costs
-  save.ts          versioned localStorage save/load + migration stub
-  offline.ts       (M3) offline earnings calc
-  prestige.ts      (M3) medals math
-render/
-  renderer.ts      Pixi stage layers, interpolation, camera shake
-  atlas.ts         runtime-baked sprite atlas (unit poses, shards, props)
-  ground.ts        baked ground/carpet texture per zone
-  tiltshift.ts     pre-blurred overlay strips (top/bottom bands)
-  particles.ts     pooled shards / pips / tracers / floaters
-  juice.ts         shake budget, hit-stop, flashes, tweens
-ui/
-  hud.ts           DOM HUD: scrap counter, wave banner, buttons
-  cards.ts         intro card, offline card, prestige box (M3)
-  toykit.css       toy-packaging design system
-audio/
-  sfx.ts           WebAudio synth: tok/chunk/blip/snap/thud + pitch ladders
-```
+## Architecture
 
-### Core technical rules (from §5)
-- Fixed-timestep sim (60 Hz) + interpolated render; hit-stop pauses **sim only**.
-- All world drawing = sprite blits from atlases baked **once** at load. No per-frame gradients/shadowBlur/full-screen canvas2d filters.
-- Pools for units, shards, pips, tracers, floating numbers. Zero allocations in frame loop.
-- Rendered-unit cap (~200) + battalion multiplier beyond it.
-- devicePixelRatio capped at 2.
-- Save schema `{ v: 1, ... }` with migration switch from day one.
+- **Runtime:** PixiJS v8 renderer mounted into a full-screen fixed canvas.
+- **Build:** Vite + TypeScript with static output in `dist/`.
+- **Simulation:** fixed timestep loop with render interpolation. Hit-stop pauses simulation while render/audio continue.
+- **State:** versioned localStorage save with migration stub from day one.
+- **Rendering layers:** baked procedural textures for terrain, props, molder, units, projectiles, particles, UI accents, and post overlays.
+- **Object lifecycle:** reusable pools for units, particles, pips, tracers, floaters, and effects.
+- **Performance posture:** cap devicePixelRatio at 2, avoid per-frame gradients/filters, batch lightweight effects through containers, and keep the visible unit count capped with battalion multipliers.
+- **Input:** touch-first global rubber-band snap plus bottom-zone upgrade controls.
+- **Audio:** WebAudio graph created only after first gesture; mute flag persists.
+- **PWA:** manifest and Apple standalone metadata preserved/implemented.
 
-### Tooling
-- **Screenshots + perf probe: Playwright** (dev dependency, chromium). Deterministic captures via dev query params (`?shot=load|kill|midbattle|upgrade` triggers scripted sim fast-forward + fixed RNG seed). Screenshots saved to `shots/` for fresh-context subagent review. Perf probe fast-forwards sim to high wave count, then measures real frame times; asserts p95 < 16.7 ms; logs WebGL renderer string (headless = SwiftShader caveat noted in results). (DECISIONS.md #4.)
-- **Deploy:** GitHub Actions → `actions/deploy-pages`. Vite `base: '/plastic-platoon/'`. Build badge = `VITE_COMMIT_SHA` short hash stamped bottom-corner; "dev" locally.
-- **PWA:** manifest + iOS standalone meta tags + generated icons (180/192/512). Minimal service worker: network-first for `index.html`, cache-first for hashed assets — offline-capable without stale-badge risk. (DECISIONS.md #5.)
+## Milestones
 
-## 2. Milestones
+### M0 - Pipeline & Prototype Parity
 
-**M0 — Pipeline & parity.** Scaffold, Actions deploy, badge, PWA shell. Port §3.1/§3.2 mechanics 1:1: molder stamps greens, marching/firing lines, tan waves + scaling, robot mini-boss every few waves, scrap economy + FASTER/BIGGER upgrades, rubber-band AoE, unit cap + battalion multiplier, localStorage save. Placeholder-but-clean art. Gate: live URL plays per spec; perf probe passes; zero console errors.
+- Scaffold Vite + TypeScript + PixiJS app.
+- Add GitHub Pages-friendly build scripts and static PWA metadata.
+- Implement molder, green/tan units, waves, basic firing, knockdowns, scrap currency, rubber-band snap, two baseline upgrades, boss wave, local save, and build badge.
+- Add automated perf probe simulating high wave pressure.
 
-**M1 — Art pass.** Baked plastic-material units (3-tone + hard specular + contact shadow + oval base), tilt-shift band overlay, carpet diorama + 2–4 giant props, march cycle on twos, idle life, toy-packaging UI kit. Gate: ≥3 implement→screenshot→critique→fix passes, then fresh-context art-review subagent grades §4.7 all-yes.
+### M1 - Premium Toybox Art Pass
 
-**M2 — Juice & audio.** Full §4.4 table (knockover shards+pips, robot hit-stop+shake, stamp squash/flash, band anticipation+kick, upgrade celebration, wave incoming, collect ticks), §4.6 synth SFX + pitch ladders, haptics, `prefers-reduced-motion` fallbacks. Gate: event-by-event verification against the juice table (screenshot bursts + code review by subagent; no screen-recording tooling available — logged caveat).
+- Write `ART_NOTES.md` from research before art code.
+- Bake glossy molded-plastic unit sprites with oval bases, hard specular hits, occlusion tones, mold seams, and contact shadows.
+- Add carpet diorama, oversized props, tilt-shift strips, hot saturation/contrast grade, breathing molder, march cycles, and toy-packaging UI.
+- Run three screenshot/self-review passes at required game moments and fix issues.
 
-**M3 — Idle layer.** Offline earnings card (rate × capped elapsed), Back-in-the-Box prestige with medal multiplier preview, zone 2 (Under the Bed), +2 upgrade verticals (RIFLES dmg, SCOUT speed), boss #2 (toy dinosaur), save hardening. Gate: scripted full-loop test — play, close, return, claim, prestige, verify persistence.
+### M2 - Juice & Audio
 
-**Final:** perf audit subagent + code review subagent, DECISIONS/ART_NOTES/PLAN committed, live URL verified.
+- Add shards, pip arcs, hit-stop, screen shake, shockwaves, stamp feedback, upgrade bursts, wave incoming dust, synthetic foley, haptics, and reduced-motion fallbacks.
+- Verify each event has visible feedback and SFX after first gesture.
 
-## 3. Risks
+### M3 - Idle Layer & Extension
 
-| Risk | Mitigation |
-|---|---|
-| Headless perf probe ≠ real iPhone | Probe catches regressions/GC churn; log renderer string + caveat; keep worst-case draw calls low by design (atlas blits, ParticleContainer) |
-| Pages deploy misconfig (base path, 404s) | Verify live URL by fetching it + browser screenshot after first deploy |
-| Runtime-baked art looks "programmer art" | Mandatory 3× screenshot-critique loop + fresh-context art reviewer; ART_NOTES.md recipes drive the vector drawing |
-| iOS audio/gesture quirks | Standard unlock-on-first-touch pattern; audio graph built lazily |
-| Save corruption across versions | `v` field + migration switch + try/catch load with reset fallback |
-| Scope blowout in M3 | Zone 2 + 1 extra boss + 2 upgrades is the floor; more zones only if time allows |
+- Add offline earnings with claim card.
+- Add Back in the Box prestige with Medal multiplier preview and confirm flow.
+- Add zones: Bedroom Carpet, Under the Bed, Hallway Hardwood, Kitchen Tile.
+- Add RIFLES and SCOUTS upgrade lines.
+- Add second boss archetype such as RC tank.
+
+## Verification Gates
+
+- `npm run build` succeeds.
+- Console error check via Playwright returns zero errors.
+- Required screenshots captured: initial load, first kill, mid-battle, upgrade purchase.
+- Three screenshot review passes are documented.
+- Perf probe reports p95 frame time below 16.7ms for the synthetic 3-minute high-pressure run, with caveats recorded for headless hardware.
+- Save/load, offline claim, prestige, and mute persistence are manually tested.
+
+## Risks
+
+- **Missing prototype:** Exact feel parity cannot be guaranteed without `reference/plastic-platoon-prototype.html`; I will recreate behavior from the brief’s numbers and log the decision.
+- **GitHub deployment:** Creating/pushing a repo and enabling Pages depends on an authenticated GitHub setup and may require owner action.
+- **Scope size:** Full M0-M3 with three screenshot loops, subagent reviews, perf audit, and deployment is substantial. I will prioritize a coherent playable vertical slice first, then broaden.
+- **PixiJS package/network:** npm install may fail if the registry is unavailable; fallback would be vanilla canvas with explicit decision logging.
+- **Headless performance:** Browser automation performance on this machine is not a reliable proxy for a mid-range iPhone; the probe will be treated as a regression signal, not real-device proof.
+
+## Decision Log Hook
+
+All product and technical judgment calls will be recorded in `DECISIONS.md` as they are made.

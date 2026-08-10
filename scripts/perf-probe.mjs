@@ -1,109 +1,64 @@
-// Perf probe: fast-forwards the sim to a heavy late-game state (3 sim-minutes+),
-// then measures real render frame times and asserts p95 < 16.7ms.
-// Headless GL is software (SwiftShader) — results are a conservative floor for
-// real GPUs on mid-range phones; the renderer string is logged for the record.
-// Usage: node scripts/perf-probe.mjs [baseUrl]
 import { chromium } from 'playwright';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 
-const base = process.argv[2] ?? 'http://localhost:4173/plastic-platoon/';
-// rAF deltas on a healthy 60Hz display are exactly ~16.7ms (vsync-quantized),
-// so the pass bar is one vsync interval + 5% jitter; p99 guards against hitches.
-const BUDGET_MS = 17.5;
-const HITCH_MS = 25;
-
-const browser = await chromium.launch({
-  args: ['--enable-gpu', '--ignore-gpu-blocklist'],
-});
-const page = await browser.newPage({
-  viewport: { width: 390, height: 844 },
-  deviceScaleFactor: 2,
-  hasTouch: true,
-});
-
-const errors = [];
-page.on('console', (m) => {
-  if (m.type() === 'error') errors.push(m.text());
-});
-page.on('pageerror', (e) => errors.push(String(e)));
-
-await page.goto(`${base}?seed=7&nosave=1`, { waitUntil: 'networkidle' });
-await page.waitForFunction(() => window.__pp !== undefined);
-await page.tap('.cta-btn').catch(() => {});
-
-const renderer = await page.evaluate(() => {
-  const c = document.createElement('canvas');
-  const gl = c.getContext('webgl2') || c.getContext('webgl');
-  if (!gl) return 'no-webgl';
-  const info = gl.getExtension('WEBGL_debug_renderer_info');
-  return info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : 'masked';
-});
-console.log('WebGL renderer:', renderer);
-
-// Build a worst-case battlefield: 3+ sim-minutes at high wave, maxed-out molds,
-// battalion cap saturated, then let real frames run and measure.
-await page.evaluate(() => {
-  const pp = window.__pp;
-  pp.setScrap(1e9);
-  for (let i = 0; i < 8; i++) pp.buy('faster');
-  for (let i = 0; i < 10; i++) pp.buy('bigger');
-  pp.sim.state.wave = 40; // heavy waves, boss cadence included
-  pp.ff(200); // 3+ minutes of simulated play at high wave count
-});
-
-// warmup, then measure two windows: pure rendering, then rendering + taps.
-// Comparing them separates game hitches from CDP/input-injection artifacts.
-await page.waitForTimeout(2000);
-
-await page.evaluate(() => window.__pp.resetFrames());
-await page.waitForTimeout(12000);
-const pure = await page.evaluate(() => window.__pp.frameStats());
-console.log(
-  `pure render : n=${pure.n} p50=${pure.p50.toFixed(2)} p95=${pure.p95.toFixed(2)} p99=${pure.p99.toFixed(2)} max=${pure.max.toFixed(1)} long=${pure.long}`
-);
-
-await page.evaluate(() => window.__pp.resetFrames());
-const start = Date.now();
-while (Date.now() - start < 10000) {
-  await page.tap('body').catch(() => {});
-  await page.waitForTimeout(2500);
+const build = process.env.npm_execpath
+  ? spawnSync(process.execPath, [process.env.npm_execpath, 'run', 'build'], { stdio: 'inherit' })
+  : spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', 'build'], { stdio: 'inherit' });
+if (build.status !== 0) {
+  throw new Error(`Build failed before perf probe${build.error ? `: ${build.error.message}` : ''}`);
 }
-const stats = await page.evaluate(() => window.__pp.frameStats());
-console.log(
-  `with taps   : n=${stats.n} p50=${stats.p50.toFixed(2)} p95=${stats.p95.toFixed(2)} p99=${stats.p99.toFixed(2)} max=${stats.max.toFixed(1)} long=${stats.long}`
-);
-const units = await page.evaluate(
-  () => window.__pp.sim.units.filter((u) => u.active).length
-);
-const wave = await page.evaluate(() => window.__pp.sim.state.wave);
 
-console.log(`active units: ${units}, wave: ${wave}`);
-console.log(
-  `frames n=${stats.n}  p50=${stats.p50.toFixed(2)}ms  p95=${stats.p95.toFixed(2)}ms  p99=${stats.p99.toFixed(2)}ms`
-);
+const PORT = 4174;
+const viteBin = 'node_modules/vite/bin/vite.js';
+const server = spawn(process.execPath, [viteBin, 'preview', '--host', '127.0.0.1', '--port', String(PORT), '--strictPort'], {
+  stdio: ['ignore', 'pipe', 'pipe']
+});
 
-// the pure-render window is ground truth for game performance; the taps window
-// additionally contains CDP input-injection overhead and is reported for context
-let fail = false;
-if (pure.p95 >= BUDGET_MS) {
-  console.error(`FAIL: pure p95 ${pure.p95.toFixed(2)}ms >= ${BUDGET_MS}ms`);
-  fail = true;
-} else if (pure.p99 >= HITCH_MS) {
-  console.error(`FAIL: pure p99 ${pure.p99.toFixed(2)}ms >= ${HITCH_MS}ms (hitching)`);
-  fail = true;
-} else {
-  console.log(
-    `PASS: pure p95 ${pure.p95.toFixed(2)}ms < ${BUDGET_MS}ms, p99 ${pure.p99.toFixed(2)}ms < ${HITCH_MS}ms`
-  );
+const started = Date.now();
+let ready = false;
+while (!ready && Date.now() - started < 15000) {
+  try {
+    const response = await fetch(`http://127.0.0.1:${PORT}`);
+    ready = response.ok;
+  } catch {
+    ready = false;
+  }
+  await new Promise((resolve) => setTimeout(resolve, 100));
 }
-if (errors.length) {
-  console.error('CONSOLE ERRORS:');
-  for (const e of errors) console.error('  ' + e);
-  fail = true;
-} else {
-  console.log('zero console errors');
+if (!ready) {
+  server.kill();
+  throw new Error('Preview server did not start');
 }
-console.log(
-  'CAVEAT: headless Chromium may use software GL; verify on-device for ground truth.'
-);
-process.exitCode = fail ? 1 : 0;
-await browser.close();
+
+let browser;
+try {
+  browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true });
+  const errors = [];
+  page.on('console', (msg) => {
+    if (msg.type() === 'error') errors.push(msg.text());
+  });
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.goto(`http://127.0.0.1:${PORT}`, { waitUntil: 'networkidle' });
+  await page.waitForFunction(() => typeof window.plasticPlatoon?.debugState === 'function');
+  await page.evaluate(() => {
+    window.plasticPlatoon.debugAddScrap(100000);
+  });
+  const cpuProbe = await page.evaluate(() => window.plasticPlatoon.debugPerfProbe(180, 1 / 60));
+  await page.waitForTimeout(1200);
+  const state = await page.evaluate(() => window.plasticPlatoon.debugState());
+  console.log(JSON.stringify({ ...state, cpuProbe, errors, caveat: 'Headless Chromium RAF can be timer-throttled; cpuProbe.p95 is the asserted frame-cost gate.' }, null, 2));
+  if (errors.length) throw new Error(`Console errors: ${errors.join('\n')}`);
+  if (cpuProbe.p95 > 16.7) throw new Error(`CPU p95 frame cost ${cpuProbe.p95.toFixed(2)}ms exceeds 16.7ms`);
+  if (cpuProbe.minUnits < 200) throw new Error(`Perf probe dropped below 200 active units: ${cpuProbe.minUnits}`);
+  if (cpuProbe.minParticles < 180) throw new Error(`Perf probe dropped below 180 active particles: ${cpuProbe.minParticles}`);
+  if (cpuProbe.longFrames > Math.max(3, cpuProbe.frames * 0.01)) {
+    throw new Error(`Too many long CPU frames over 16.7ms: ${cpuProbe.longFrames}/${cpuProbe.frames}`);
+  }
+  if (cpuProbe.max > 150) throw new Error(`Extreme CPU frame spike ${cpuProbe.max.toFixed(2)}ms exceeds 150ms`);
+} finally {
+  await browser?.close().catch(() => undefined);
+  server.kill();
+  await once(server, 'exit').catch(() => undefined);
+}

@@ -1,21 +1,25 @@
 {
   "name": "plastic-platoon",
-  "private": true,
   "version": "0.1.0",
+  "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview",
-    "shots": "node scripts/shots.mjs",
-    "perf": "node scripts/perf-probe.mjs"
+    "preview": "vite preview --host 127.0.0.1",
+    "probe": "node scripts/perf-probe.mjs",
+    "pwa:check": "node scripts/check-pwa.mjs",
+    "save:check": "node scripts/check-save-flows.mjs",
+    "screenshots": "node scripts/capture-screenshots.mjs",
+    "review": "node scripts/review-screenshots.mjs"
   },
   "dependencies": {
-    "pixi.js": "^8.6.6"
+    "pixi.js": "^8.19.0"
   },
   "devDependencies": {
-    "playwright": "^1.49.1",
-    "typescript": "~5.7.2",
-    "vite": "^6.0.7"
+    "@types/node": "^24.2.0",
+    "playwright": "^1.55.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.1"
   }
 }

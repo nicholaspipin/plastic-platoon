@@ -2,24 +2,24 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
-    />
-    <title>Plastic Platoon</title>
-    <meta name="description" content="Green vs tan. The floor is a battlefield." />
-    <meta name="theme-color" content="#2c3a1e" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <meta name="theme-color" content="#315f31" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="Platoon" />
-    <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="apple-touch-icon" href="icons/icon-180.png" />
-    <link rel="icon" type="image/png" href="icons/icon-192.png" />
+    <meta name="apple-mobile-web-app-title" content="Plastic Platoon" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="description" content="A toybox idle lane battle starring glossy green plastic army men." />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
+    <title>Plastic Platoon</title>
   </head>
   <body>
-    <div id="game"></div>
-    <div id="ui"></div>
+    <div id="app">
+      <div class="boot-card">
+        <div class="boot-title">PLASTIC PLATOON</div>
+        <div class="boot-subtitle">Loading toybox...</div>
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
