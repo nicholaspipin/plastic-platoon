@@ -51,6 +51,7 @@ export class Renderer {
   private unitBodies: Sprite[] = [];
   private spawnT: Float32Array = new Float32Array(0); // per-unit hop anim
   private lean: Float32Array = new Float32Array(0); // per-unit static toy lean
+  private hitT: Float32Array = new Float32Array(0); // per-unit flinch anim
   private pipSprites: Sprite[] = [];
   private tracers: Tracer[] = [];
   private rings: RingFx[] = [];
@@ -87,7 +88,11 @@ export class Renderer {
       preference: 'webgl',
     });
     parent.appendChild(this.app.canvas);
-    this.reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const rmQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    this.reducedMotion = rmQuery.matches;
+    rmQuery.addEventListener?.('change', (e) => {
+      this.reducedMotion = e.matches;
+    });
 
     this.atlas = bakeAtlas();
 
@@ -104,6 +109,7 @@ export class Renderer {
     // unit sprite pools, parallel to sim.units
     this.spawnT = new Float32Array(sim.units.length).fill(9);
     this.lean = new Float32Array(sim.units.length);
+    this.hitT = new Float32Array(sim.units.length);
     for (let i = 0; i < sim.units.length; i++) {
       const sh = new Sprite(this.atlas.tex.shadow);
       sh.anchor.set(0.5, 0.5);
@@ -253,10 +259,22 @@ export class Renderer {
 
   handleEvent(e: SimEvent, sim: Sim) {
     switch (e.type) {
-      case 'stamp':
+      case 'stamp': {
         this.stampAnim = 1;
-        this.addTrauma(0.16);
+        this.addTrauma(0.3);
+        // impact flash on the platform as the ram lands
+        for (const f of this.flashes) {
+          if (f.spr.visible) continue;
+          f.spr.visible = true;
+          f.spr.position.set(LAYOUT.molderX + 20, this.h * LAYOUT.molderY - 52);
+          f.spr.rotation = Math.random() * Math.PI;
+          f.spr.scale.set(2.6);
+          f.spr.alpha = 1;
+          f.t = 0;
+          break;
+        }
         break;
+      }
       case 'spawn':
         this.spawnT[e.i] = 0;
         this.lean[e.i] = (sim.units[e.i].phase / Math.PI - 1) * 0.06; // ±3.5° toy lean
@@ -318,7 +336,17 @@ export class Renderer {
                 : 0xecd7a8;
         const count = e.kind === 'soldier' ? 7 + ((Math.random() * 5) | 0) : 26;
         this.spawnShards(e.x, e.y - 16, count, tint, e.kind === 'soldier' ? 1 : 1.6);
-        if (e.kind !== 'soldier') this.addTrauma(0.5);
+        if (e.kind !== 'soldier') {
+          this.addTrauma(0.5);
+          // reduced-motion users get a flash in place of hit-stop + shake
+          if (this.reducedMotion) this.spawnFlash(e.x, e.y - 20, 4.5);
+        }
+        break;
+      }
+      case 'hit': {
+        // victim flinch: brief squash so every landed shot reads on the target
+        const u = sim.units[e.i];
+        if (u.active && u.state !== 'dying') this.hitT[e.i] = 0.001;
         break;
       }
       case 'buy': {
@@ -361,7 +389,8 @@ export class Renderer {
 
   addTrauma(v: number) {
     if (this.reducedMotion) return;
-    this.trauma = Math.min(1, this.trauma + v);
+    // overlapping shakes take the strongest, never the sum (§4.4)
+    this.trauma = Math.min(1, Math.max(this.trauma, v));
   }
 
   private spawnTracer(x1: number, y1: number, x2: number, y2: number) {
@@ -380,13 +409,13 @@ export class Renderer {
     }
   }
 
-  private spawnFlash(x: number, y: number) {
+  private spawnFlash(x: number, y: number, scale = 0) {
     for (const f of this.flashes) {
       if (f.spr.visible) continue;
       f.spr.visible = true;
       f.spr.position.set(x, y);
       f.spr.rotation = Math.random() * Math.PI * 2;
-      f.spr.scale.set(0.8 + Math.random() * 0.5);
+      f.spr.scale.set(scale > 0 ? scale : 0.8 + Math.random() * 0.5);
       f.spr.alpha = 1;
       f.t = 0;
       return;
@@ -401,6 +430,19 @@ export class Renderer {
       r.spr.alpha = 0.9;
       r.spr.scale.set(0.3);
       r.t = 0;
+      return;
+    }
+  }
+
+  /** Anticipation cue for the rubber band: a ring contracts onto the tap point. */
+  anticipateBand(x: number, y: number) {
+    for (const r of this.rings) {
+      if (r.spr.visible) continue;
+      r.spr.visible = true;
+      r.spr.position.set(x, y);
+      r.spr.alpha = 0.55;
+      r.spr.scale.set(1.15);
+      r.t = -0.09; // negative t = contract phase, matches the 80ms snap delay
       return;
     }
   }
@@ -472,6 +514,9 @@ export class Renderer {
         }
       }
       if (body.texture !== tex) body.texture = tex;
+      // zone skin: under the bed, the invaders are dusty gray-blue
+      const wantTint = this.groundZone === 1 && u.faction === 1 ? 0xc9cede : 0xffffff;
+      if (body.tint !== wantTint) body.tint = wantTint;
 
       let rot = this.lean[i];
       let bob = 0;
@@ -488,6 +533,17 @@ export class Renderer {
           const s = (k - 0.8) / 0.2;
           sx = 1 + Math.sin(s * Math.PI) * 0.18;
           sy = 1 - Math.sin(s * Math.PI) * 0.14;
+        }
+      }
+
+      // victim flinch: 80ms squash when a shot lands
+      if (this.hitT[i] > 0) {
+        this.hitT[i] += dt;
+        if (this.hitT[i] >= 0.08) this.hitT[i] = 0;
+        else {
+          const s = Math.sin((this.hitT[i] / 0.08) * Math.PI);
+          sx *= 1 + s * 0.12;
+          sy *= 1 - s * 0.1;
         }
       }
 
@@ -557,9 +613,17 @@ export class Renderer {
       if (f.t >= 0.05) f.spr.visible = false;
     }
 
-    // rings
+    // rings: negative t = anticipation contraction, positive = shockwave
     for (const r of this.rings) {
       if (!r.spr.visible) continue;
+      if (r.t < 0) {
+        r.t += dt;
+        const k = 1 + r.t / 0.09; // 0 → 1 over the contract phase
+        r.spr.scale.set(1.15 - k * 0.85);
+        r.spr.alpha = 0.55 + k * 0.3;
+        if (r.t >= 0) r.spr.visible = false;
+        continue;
+      }
       r.t += dt * 3.2;
       r.spr.scale.set(0.3 + r.t * 1.6);
       r.spr.alpha = Math.max(0, 0.9 * (1 - r.t));

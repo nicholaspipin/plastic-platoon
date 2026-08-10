@@ -61,7 +61,7 @@ export type SimEvent =
   | { type: 'stamp'; count: number }
   | { type: 'spawn'; i: number }
   | { type: 'fire'; i: number; tx: number; ty: number; faction: Faction }
-  | { type: 'hit'; x: number; y: number; faction: Faction }
+  | { type: 'hit'; i: number; x: number; y: number; faction: Faction }
   | { type: 'kill'; x: number; y: number; kind: UnitKind; faction: Faction; tipDir: number }
   | { type: 'collect'; value: number }
   | { type: 'band'; x: number; y: number }
@@ -372,6 +372,8 @@ export class Sim {
 
   private startWave() {
     const w = this.state.wave;
+    // zone progression: Under the Bed from wave 15 (more zones post-M3)
+    if (w >= 15 && this.state.zone < 1) this.state.zone = 1;
     const isBossWave = w % ROBOT.everyNWaves === 0;
     let count = WAVES.baseCount + Math.round(w * WAVES.countGrowth);
     if (isBossWave) count = Math.max(3, Math.round(count * 0.5));
@@ -506,7 +508,7 @@ export class Sim {
     const u = this.units[idx];
     if (!u.active || u.state === 'dying') return;
     u.hp -= amount;
-    this.events.push({ type: 'hit', x: u.x, y: u.y, faction: u.faction });
+    this.events.push({ type: 'hit', i: idx, x: u.x, y: u.y, faction: u.faction });
     if (u.hp <= 0) this.kill(idx, tipDir);
   }
 
@@ -531,8 +533,10 @@ export class Sim {
     for (let k = 0; k < n; k++) {
       const p = this.allocPip();
       if (!p) {
-        // pool exhausted: bank it directly, never lose scrap
+        // pool exhausted: bank it directly — never lose scrap, never silently:
+        // the collect event still drives the blip + counter pulse
         this.addScrap(total - k * each);
+        this.events.push({ type: 'collect', value: total - k * each });
         return;
       }
       p.x = p.px = x;

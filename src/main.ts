@@ -2,8 +2,10 @@ import './ui/style.css';
 import { SIM_DT } from './sim/defs';
 import { Sim } from './sim/sim';
 import { applySave, loadGame, saveGame, clearSave } from './sim/save';
+import { computeOffline } from './sim/offline';
 import { Renderer } from './render/renderer';
 import { Hud } from './ui/hud';
+import { showOfflineCard, PrestigeUi } from './ui/cards';
 import { Sfx } from './audio/sfx';
 
 const params = new URLSearchParams(location.search);
@@ -40,6 +42,12 @@ const hud = new Hud(
 );
 sfx.muted = save?.muted ?? false;
 
+const prestigeUi = new PrestigeUi(uiEl, () => {
+  sim.prestige();
+  renderer.refreshStuds(sim);
+  persist();
+});
+
 // frame-time ring buffer for the perf probe (cheap: one write per frame)
 const frameTimes = new Float32Array(1200);
 let frameIdx = 0;
@@ -50,12 +58,22 @@ let hitStop = 0; // seconds of sim freeze (render keeps running)
 async function boot() {
   await renderer.init(gameEl, sim);
 
-  // input: tap anywhere on the battlefield = rubber band snap
+  // input: tap anywhere on the battlefield = rubber band snap.
+  // ~80ms anticipation between the tap and the snap itself (juice table §4.4).
+  let bandPending = false;
   renderer.app.canvas.addEventListener('pointerdown', (e: PointerEvent) => {
     sfx.unlock();
+    if (bandPending || sim.bandCd > 0) return;
+    bandPending = true;
     const rect = renderer.app.canvas.getBoundingClientRect();
-    sim.tryBand(e.clientX - rect.left, e.clientY - rect.top);
-    if (navigator.vibrate) navigator.vibrate(8);
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    renderer.anticipateBand(x, y);
+    setTimeout(() => {
+      bandPending = false;
+      sim.tryBand(x, y);
+      if (navigator.vibrate) navigator.vibrate(12);
+    }, 80);
   });
 
   let resizeT = 0;
@@ -72,6 +90,25 @@ async function boot() {
     });
   }
 
+  prestigeUi.bind(sim);
+
+  // offline earnings: one card max at session start (returning players only)
+  if (save && seenIntro) {
+    const offline = computeOffline(save);
+    if (offline) {
+      showOfflineCard(uiEl, offline, () => {
+        sim.state.scrap += offline.scrap;
+        sim.state.totalScrapEarned += offline.scrap;
+        sfx.unlock();
+        const fake = { type: 'buy', id: 'faster' } as const;
+        sfx.handleEvent(fake);
+        renderer.handleEvent(fake, sim); // molder celebrates the claim
+        persist();
+      });
+    }
+  }
+
+  let lastZone = sim.state.zone;
   let last = performance.now();
   let acc = 0;
 
@@ -101,11 +138,26 @@ async function boot() {
       renderer.handleEvent(e, sim);
       hud.handleEvent(e, sim);
       sfx.handleEvent(e);
+      // hit-stop freezes the sim, never render or audio; reduced-motion
+      // users get the renderer's flash effects instead
+      if (e.type === 'kill' && e.kind !== 'soldier') {
+        if (!renderer.reducedMotion) hitStop = Math.max(hitStop, 0.07);
+        if (navigator.vibrate) navigator.vibrate(25);
+      } else if (e.type === 'buy' && navigator.vibrate) {
+        navigator.vibrate(8);
+      }
     }
     sim.events.length = 0;
 
+    // zone shift: rebake the diorama when the battlefield moves rooms
+    if (sim.state.zone !== lastZone) {
+      lastZone = sim.state.zone;
+      renderer.rebakeGround(lastZone);
+    }
+
     renderer.render(sim, acc / SIM_DT, rawDt);
     hud.update(sim, rawDt);
+    prestigeUi.update(sim);
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
@@ -117,8 +169,24 @@ function persist() {
 }
 
 setInterval(persist, 5000);
+// iOS PWAs resume from memory rather than reloading, so the load-time offline
+// check never re-runs — do it on visibility return after a long background too.
+let hiddenAt = 0;
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden') persist();
+  if (document.visibilityState === 'hidden') {
+    hiddenAt = Date.now();
+    persist();
+  } else if (hiddenAt > 0 && !nosave) {
+    const offline = computeOffline({ lastSeen: hiddenAt, scrapRate: sim.scrapRate });
+    hiddenAt = 0;
+    if (offline) {
+      showOfflineCard(uiEl, offline, () => {
+        sim.state.scrap += offline.scrap;
+        sim.state.totalScrapEarned += offline.scrap;
+        persist();
+      });
+    }
+  }
 });
 window.addEventListener('pagehide', persist);
 
@@ -138,6 +206,7 @@ declare global {
       setScrap: (n: number) => void;
       buy: (id: 'faster' | 'bigger' | 'rifles' | 'scouts') => boolean;
       resetSave: () => void;
+      saveNow: () => void;
       hitStop: (ms: number) => void;
       frameStats: () => {
         p50: number;
@@ -162,6 +231,9 @@ window.__pp = {
   resetSave: () => {
     clearSave();
     location.reload();
+  },
+  saveNow: () => {
+    saveGame(sim, { muted: sfx.muted, seenIntro });
   },
   hitStop: (ms) => {
     hitStop = Math.max(hitStop, ms / 1000);
