@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "Plastic Platoon",
+    "slug": "plastic-platoon",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "plastic-platoon",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#1f3323",
+    "icon": "./public/icons/expo-icon.png",
+    "plugins": [
+      "expo-status-bar"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.nicholaspipin.plasticplatoon",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.nicholaspipin.plasticplatoon",
+      "edgeToEdgeEnabled": true
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./public/icons/expo-icon.png"
+    },
+    "extra": {
+      "gameUrl": "https://nicholaspipin.github.io/plastic-platoon/"
+    }
+  }
+}

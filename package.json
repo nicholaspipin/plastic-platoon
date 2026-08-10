@@ -3,19 +3,33 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "main": "expo/AppEntry.js",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "shots": "node scripts/shots.mjs",
-    "perf": "node scripts/perf-probe.mjs"
+    "perf": "node scripts/perf-probe.mjs",
+    "expo:start": "expo start",
+    "expo:android": "expo start --android",
+    "expo:ios": "expo start --ios",
+    "expo:web": "expo start --web"
   },
   "dependencies": {
-    "pixi.js": "^8.6.6"
+    "@expo/metro-runtime": "~57.0.8",
+    "expo": "~57.0.11",
+    "expo-status-bar": "~57.0.1",
+    "pixi.js": "^8.6.6",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native": "0.86.2",
+    "react-native-web": "~0.21.2",
+    "react-native-webview": "13.16.1"
   },
   "devDependencies": {
+    "@types/react": "~19.2.4",
     "playwright": "^1.49.1",
-    "typescript": "~5.7.2",
+    "typescript": "~6.0.3",
     "vite": "^6.0.7"
   }
 }

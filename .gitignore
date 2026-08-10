@@ -1,5 +1,11 @@
 node_modules/
 dist/
 shots/
+.vite/
+.expo/
+.expo-shared/
+work/
 *.local
+*.log
+*.tsbuildinfo
 .DS_Store
